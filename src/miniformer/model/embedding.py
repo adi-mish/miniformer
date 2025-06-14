@@ -52,6 +52,7 @@ class PositionalEncoding(nn.Module):
         
         # Register as buffer (not a parameter)
         self.register_buffer('pe', pe)
+        self.pe: torch.Tensor
         
     def forward(self, x):
         """

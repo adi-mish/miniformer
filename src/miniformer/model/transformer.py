@@ -1,28 +1,37 @@
 import torch
 import torch.nn as nn
+import os
+from typing import Dict, List, Optional, Union, Tuple
 
 from miniformer.model.attention import MultiHeadAttention
 from miniformer.model.embedding import TokenEmbedding, PositionalEncoding
 from miniformer.model.feedforward import FeedForward
+from miniformer.config.model_config import TransformerConfig
 
 
 class EncoderLayer(nn.Module):
     """Transformer encoder layer"""
     
-    def __init__(self, d_model, n_heads, d_ff, dropout=0.1):
+    def __init__(self, config: TransformerConfig):
         """
         Args:
-            d_model: Model dimension
-            n_heads: Number of attention heads
-            d_ff: Feed-forward network hidden dimension
-            dropout: Dropout probability
+            config: Model configuration
         """
         super().__init__()
-        self.self_attention = MultiHeadAttention(d_model, n_heads, dropout)
-        self.feed_forward = FeedForward(d_model, d_ff, dropout)
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout)
+        self.self_attention = MultiHeadAttention(
+            d_model=config.d_model,
+            n_heads=config.n_heads,
+            dropout=config.dropout
+        )
+        self.feed_forward = FeedForward(
+            d_model=config.d_model,
+            d_ff=config.d_ff,
+            dropout=config.dropout,
+            activation=config.activation
+        )
+        self.norm1 = nn.LayerNorm(config.d_model, eps=config.layer_norm_eps)
+        self.norm2 = nn.LayerNorm(config.d_model, eps=config.layer_norm_eps)
+        self.dropout = nn.Dropout(config.dropout)
         
     def forward(self, x, mask=None):
         """
@@ -48,37 +57,66 @@ class EncoderLayer(nn.Module):
 class Encoder(nn.Module):
     """Transformer encoder"""
     
-    def __init__(self, vocab_size, d_model, n_heads, n_layers, d_ff, dropout=0.1, max_seq_len=5000):
+    def __init__(self, config: TransformerConfig):
         """
         Args:
-            vocab_size: Vocabulary size
-            d_model: Model dimension
-            n_heads: Number of attention heads
-            n_layers: Number of encoder layers
-            d_ff: Feed-forward network hidden dimension
-            dropout: Dropout probability
-            max_seq_len: Maximum sequence length
+            config: Model configuration
         """
         super().__init__()
-        self.token_embedding = TokenEmbedding(vocab_size, d_model)
-        self.position_encoding = PositionalEncoding(d_model, max_seq_len, dropout)
+        self.config = config
+        
+        # Create token embedding only if input_dim is not specified
+        if config.input_dim is None:
+            self.token_embedding = TokenEmbedding(config.vocab_size, config.d_model)
+        else:
+            self.token_embedding = None
+            
+        self.position_encoding = PositionalEncoding(
+            d_model=config.d_model,
+            max_seq_len=config.max_seq_len,
+            dropout=config.dropout
+        )
         self.layers = nn.ModuleList([
-            EncoderLayer(d_model, n_heads, d_ff, dropout)
-            for _ in range(n_layers)
+            EncoderLayer(config)
+            for _ in range(config.n_layers)
         ])
         self.attention_weights = None
+        
+        # Apply weight initialization
+        self.apply(self._init_weights)
+        
+    def _init_weights(self, module):
+        """Initialize model weights"""
+        if isinstance(module, (nn.Linear, nn.Embedding)):
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            if isinstance(module, nn.Linear) and module.bias is not None:
+                module.bias.data.zero_()
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
         
     def forward(self, x, mask=None):
         """
         Args:
-            x: Input token ids (batch_size, seq_len)
+            x: Input token ids (batch_size, seq_len) or feature vectors (batch_size, seq_len, d_model)
             mask: Attention mask (batch_size, 1, 1, seq_len)
             
         Returns:
             output: Encoded representation (batch_size, seq_len, d_model)
         """
-        # Get token embeddings and add positional encoding
-        x = self.token_embedding(x)
+        # For token IDs, use token embedding; otherwise, use input features directly
+        if self.token_embedding is not None:
+            # Input is token IDs
+            if x.dim() == 2:
+                x = self.token_embedding(x)
+            else:
+                raise ValueError("When token_embedding is used, input should be 2D tensor of token IDs")
+        else:
+            # Input is already embedded features
+            if x.dim() != 3 or x.size(-1) != self.config.d_model:
+                raise ValueError(f"Expected input features of shape (batch_size, seq_len, {self.config.d_model})")
+        
+        # Add positional encoding
         x = self.position_encoding(x)
         
         # Store attention weights for visualization
@@ -93,40 +131,58 @@ class Encoder(nn.Module):
 
 
 class Transformer(nn.Module):
-    """Simple transformer model for sequence classification or prediction tasks"""
+    """Transformer model for sequence classification or prediction tasks"""
     
-    def __init__(self, vocab_size, d_model=64, n_heads=4, n_layers=3, d_ff=256, dropout=0.1, max_seq_len=5000):
+    def __init__(self, config: Optional[TransformerConfig] = None, **kwargs):
         """
         Args:
-            vocab_size: Vocabulary size
-            d_model: Model dimension
-            n_heads: Number of attention heads
-            n_layers: Number of encoder layers
-            d_ff: Feed-forward network hidden dimension
-            dropout: Dropout probability
-            max_seq_len: Maximum sequence length
+            config: Model configuration
+            **kwargs: Override configuration parameters
         """
         super().__init__()
-        self.encoder = Encoder(vocab_size, d_model, n_heads, n_layers, d_ff, dropout, max_seq_len)
-        self.output_layer = nn.Linear(d_model, vocab_size)
+        
+        # Create config if not provided
+        if config is None:
+            if kwargs:
+                config = TransformerConfig(**kwargs)
+            else:
+                config = TransformerConfig()
+        elif kwargs:
+            # Update config with any provided kwargs
+            for key, value in kwargs.items():
+                if hasattr(config, key):
+                    setattr(config, key, value)
+                    
+        self.config = config
+        self.encoder = Encoder(config)
+        
+        # Use output_dim for final projection
+        if config.output_dim is None:
+            raise ValueError("output_dim must be specified in TransformerConfig for the output layer.")
+        self.output_layer = nn.Linear(config.d_model, config.output_dim)
         
     def forward(self, x, mask=None):
         """
         Args:
-            x: Input token ids (batch_size, seq_len)
+            x: Input token ids (batch_size, seq_len) or feature vectors (batch_size, seq_len, d_model)
             mask: Attention mask (batch_size, 1, 1, seq_len)
             
         Returns:
-            output: Output logits (batch_size, seq_len, vocab_size)
+            output: Output logits (batch_size, seq_len, output_dim)
         """
         # Create mask if not provided
         if mask is None and x is not None:
-            mask = self._create_mask(x)
+            # For token IDs (2D tensor)
+            if x.dim() == 2:
+                mask = (x != 0).unsqueeze(1).unsqueeze(2)
+            # For feature vectors (3D tensor), assume all positions are valid
+            else:
+                mask = torch.ones((x.size(0), 1, 1, x.size(1)), device=x.device).bool()
             
         # Encode input
         encoded = self.encoder(x, mask)
         
-        # Project to vocabulary
+        # Project to output dimension
         output = self.output_layer(encoded)
         
         return output
@@ -142,3 +198,31 @@ class Transformer(nn.Module):
         mask = self._create_mask(x)
         _ = self.forward(x, mask)
         return self.encoder.attention_weights
+        
+    def save_pretrained(self, save_dir: str) -> None:
+        """Save model and configuration to directory"""
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # Save model weights
+        model_path = os.path.join(save_dir, "model.pt")
+        torch.save(self.state_dict(), model_path)
+        
+        # Save configuration
+        config_path = os.path.join(save_dir, "config.json")
+        self.config.save_json(config_path)
+        
+    @classmethod
+    def from_pretrained(cls, model_dir: str) -> "Transformer":
+        """Load model from directory"""
+        # Load configuration
+        config_path = os.path.join(model_dir, "config.json")
+        config = TransformerConfig.from_json(config_path)
+        
+        # Create model with loaded config
+        model = cls(config)
+        
+        # Load weights
+        model_path = os.path.join(model_dir, "model.pt")
+        model.load_state_dict(torch.load(model_path))
+        
+        return model
