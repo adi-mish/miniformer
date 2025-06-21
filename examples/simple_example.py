@@ -1,6 +1,6 @@
 import torch
 import matplotlib.pyplot as plt
-from miniformer import Transformer
+from miniformer.model.transformer import Transformer
 from miniformer.visualization import plot_attention
 
 # Create a small transformer model
