@@ -44,6 +44,7 @@ def plot_attention(attention_weights, layer=0, head=0, tokens=None):
 def visualize_embeddings(model, vocab, method='pca'):
     """Visualize token embeddings using dimensionality reduction"""
     import sklearn.decomposition as decomposition
+    import sklearn.manifold as manifold
     
     # Get embeddings from model
     embeddings = model.encoder.token_embedding.embedding.weight.cpu().detach().numpy()
@@ -52,7 +53,7 @@ def visualize_embeddings(model, vocab, method='pca'):
     if method == 'pca':
         reducer = decomposition.PCA(n_components=2)
     else:  # default to t-SNE
-        reducer = decomposition.TSNE(n_components=2)
+        reducer = manifold.TSNE(n_components=2)
     
     reduced_embeddings = reducer.fit_transform(embeddings)
     

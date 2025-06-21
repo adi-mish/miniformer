@@ -6,7 +6,7 @@ authors = [
     {name = "adi-mish", email = "adimishra545@gmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9,<4.0"
 dependencies = [
     "numpy>=2.0.0",
     "torch>=2.0.0",
@@ -46,6 +46,6 @@ profile = "black"
 line_length = 100
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.9"
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
