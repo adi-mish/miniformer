@@ -17,7 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from miniformer.config.model_config import TransformerConfig
-from miniformer.model.transformer import Encoder  # existing encoder (encoder‑only)
+from miniformer.model.encoder import Encoder      # existing decoder stack
 from miniformer.model.decoder import Decoder      # existing decoder stack
 
 __all__ = [
