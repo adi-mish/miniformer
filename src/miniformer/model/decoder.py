@@ -37,31 +37,61 @@ class DecoderLayer(nn.Module):
         self.dropout = nn.Dropout(config.dropout)
         
     def forward(
-        self, 
-        x: torch.Tensor, 
+        self,
+        x: torch.Tensor,
         encoder_output: torch.Tensor,
         self_attn_mask: Optional[torch.Tensor] = None,
-        cross_attn_mask: Optional[torch.Tensor] = None
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Self attention with causal mask
-        attn_output, self_attn = self.self_attention(x, x, x, self_attn_mask)
-        x = self.norm1(x + self.dropout(attn_output))
-        
-        # Cross attention with encoder output
-        cross_output, cross_attn = self.cross_attention(
-            q=x,
+        cross_attn_mask: Optional[torch.Tensor] = None,
+        past_self: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        past_cross: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        use_cache: bool = False,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor,
+               Optional[Tuple[torch.Tensor, torch.Tensor]], Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+
+        # choose norm order
+        residual = x
+        if self.pre_norm:
+            x_ = self.norm1(x)
+        else:
+            x_ = x
+
+        attn_out, self_attn, new_self = self.self_attention(
+            x_, x_, x_, self_attn_mask, past_self, use_cache
+        )
+        x = residual + self.dropout(attn_out)
+        if not self.pre_norm:
+            x = self.norm1(x)
+
+        # --- cross ---------------------------------------------------------
+        residual = x
+        if self.pre_norm:
+            x_ = self.norm2(x)
+        else:
+            x_ = x
+        cross_out, cross_attn, new_cross = self.cross_attention(
+            q=x_,
             k=encoder_output,
             v=encoder_output,
-            mask=cross_attn_mask
+            mask=cross_attn_mask,
+            past_kv=past_cross,
+            use_cache=use_cache,
         )
-        x = self.norm2(x + self.dropout(cross_output))
-        
-        # Feed forward
-        ff_output = self.feed_forward(x)
-        output = self.norm3(x + self.dropout(ff_output))
-        
-        return output, self_attn, cross_attn
+        x = residual + self.dropout(cross_out)
+        if not self.pre_norm:
+            x = self.norm2(x)
 
+        # --- ffn -----------------------------------------------------------
+        residual = x
+        if self.pre_norm:
+            x_ = self.norm3(x)
+        else:
+            x_ = x
+        ff_out = self.feed_forward(x_)
+        x = residual + self.dropout(ff_out)
+        if not self.pre_norm:
+            x = self.norm3(x)
+
+        return x, self_attn, cross_attn, new_self, new_cross
 
 class Decoder(nn.Module):
     """Transformer decoder stack supporting various data types"""

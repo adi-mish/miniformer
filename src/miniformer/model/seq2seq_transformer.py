@@ -175,30 +175,54 @@ class Seq2SeqTransformer(nn.Module):
         bos_token_id: int = 1,
         eos_token_id: int = 2,
         temperature: float = 1.0,
+        top_k: int = 50,
+        top_p: float = 0.95,
     ) -> torch.Tensor:
-        """Greedy generation helper (no beam, no kv‑cache yet).
-
-        Only works when the model is configured for token‑id I/O.
-        """
         if self.decoder.token_embedding is None:
             raise RuntimeError("generate() is only available in token‑based mode.")
 
         device = src.device
         src_mask = create_padding_mask(src)
 
-        # encode once
         memory = self.encoder(src, src_mask)
         memory_mask = src_mask
 
-        # start with BOS
         generated = torch.full((src.size(0), 1), bos_token_id, dtype=torch.long, device=device)
+        past_kv: Optional[List[Tuple[Tuple, Tuple]]] = None
 
         for _ in range(max_new_tokens):
             tgt_mask = create_causal_mask(generated.size(1), device)
-            logits, _, _ = self.decoder(generated, memory, tgt_mask, memory_mask)
-            next_token = logits[:, -1, :] / temperature
-            next_token = torch.argmax(next_token, dim=-1, keepdim=True)
+            logits, _, _, past_kv = self.decoder(
+                generated,
+                memory,
+                tgt_mask,
+                memory_mask,
+                past_key_values=past_kv,
+                use_causal_mask=False,
+                use_cache=True,
+            )
+            next_token_logits = logits[:, -1, :] / temperature
+
+            # top‑k / nucleus (top‑p) sampling
+            if top_k > 0:
+                top_k = min(top_k, next_token_logits.size(-1))  # guard
+                values, _ = torch.topk(next_token_logits, top_k)
+                min_keep = values[:, -1].unsqueeze(-1)
+                next_token_logits = torch.where(
+                    next_token_logits < min_keep, torch.full_like(next_token_logits, -1e4), next_token_logits
+                )
+            if top_p < 1.0:
+                sorted_logits, sorted_idx = torch.sort(next_token_logits, descending=True)
+                cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
+                sorted_mask = cumulative_probs > top_p
+                sorted_logits[sorted_mask] = -1e4
+                next_token_logits = torch.zeros_like(next_token_logits).scatter(1, sorted_idx, sorted_logits)
+
+            probs = F.softmax(next_token_logits, dim=-1)
+            next_token = torch.argmax(probs, dim=-1, keepdim=True)  # greedy inside filtered set
             generated = torch.cat([generated, next_token], dim=1)
+
             if (next_token == eos_token_id).all():
                 break
+
         return generated

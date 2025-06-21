@@ -1,36 +1,26 @@
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class FeedForward(nn.Module):
-    """Feed-forward network used in transformer"""
-    
-    def __init__(self, d_model, d_ff, dropout=0.1, activation="gelu"):
-        """
-        Args:
-            d_model: Input and output dimension
-            d_ff: Hidden dimension
-            dropout: Dropout probability
-            activation: Activation function ("gelu" or "relu")
-        """
+    """FFN with GELU / ReLU / SwiGLU (gated)."""
+
+    def __init__(self, d_model: int, d_ff: int, dropout: float = 0.1, activation: str = "gelu"):
         super().__init__()
-        self.linear1 = nn.Linear(d_model, d_ff)
-        self.linear2 = nn.Linear(d_ff, d_model)
-        self.dropout = nn.Dropout(dropout)
-        
-        # Select activation function
-        if activation == "gelu":
-            self.activation = nn.GELU()
-        elif activation == "relu":
-            self.activation = nn.ReLU()
+        self.activation_name = activation.lower()
+        if self.activation_name == "swiglu":  # half projection, double out = 2*d_ff
+            self.w12 = nn.Linear(d_model, d_ff * 2)
+            self.proj = nn.Linear(d_ff, d_model)
         else:
-            raise ValueError(f"Unsupported activation: {activation}")
-        
+            self.linear1 = nn.Linear(d_model, d_ff)
+            self.linear2 = nn.Linear(d_ff, d_model)
+
+        self.dropout = nn.Dropout(dropout)
+
     def forward(self, x):
-        """
-        Args:
-            x: Input tensor (batch_size, seq_len, d_model)
-            
-        Returns:
-            output: Transformed tensor (batch_size, seq_len, d_model)
-        """
-        return self.linear2(self.dropout(self.activation(self.linear1(x))))
+        if self.activation_name == "swiglu":
+            x1, x2 = self.w12(x).chunk(2, dim=-1)
+            return self.proj(self.dropout(F.silu(x1) * x2))
+        else:
+            act_fn = F.gelu if self.activation_name == "gelu" else F.relu
+            return self.linear2(self.dropout(act_fn(self.linear1(x))))
