@@ -266,7 +266,7 @@ pytest tests/ --cov=miniformer
 
 ## 🔒 License
 
-MIT
+GNU GENERAL PUBLIC LICENSE Version 3
 
 ## 🔗 References
 
