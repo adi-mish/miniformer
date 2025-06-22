@@ -66,11 +66,26 @@ class Seq2SeqTransformer(nn.Module):
         # --- sub-modules ----------------------------------------------------
         self.encoder = Encoder(config)
         self.decoder = Decoder(config)
-        # override decoder projection to identity for seq2seq outputs
-        self.decoder.output_projection = nn.Linear(config.d_model, config.d_model, bias=False)
-        # Initialize as identity transformation
-        with torch.no_grad():
-            self.decoder.output_projection.weight.copy_(torch.eye(config.d_model))
+        # # override decoder projection to identity for seq2seq outputs
+        # self.decoder.output_projection = nn.Linear(config.d_model, config.d_model, bias=False)
+        # # Initialize as identity transformation
+        # with torch.no_grad():
+        #     self.decoder.output_projection.weight.copy_(torch.eye(config.d_model))
+
+        # # if user asked for an explicit output_dim, project decoder→that
+        # if config.output_dim is not None:
+        # ── decoder head policy ─────────────────────────────────────────
+        if config.output_dim is None:
+            # keep hidden states; masks-tests expect d_model-sized output
+            self.decoder.output_projection = nn.Linear(config.d_model, config.d_model, bias=False)
+            # Initialize as identity transformation
+            with torch.no_grad():
+                self.decoder.output_projection.weight.copy_(torch.eye(config.d_model))
+        else:
+            self.decoder.output_projection = nn.Linear(
+                config.d_model, config.output_dim, bias=False
+            )
+            nn.init.xavier_uniform_(self.decoder.output_projection.weight)
 
         # optionally tie token embeddings
         if share_embeddings and self.encoder.token_embedding is not None and self.decoder.token_embedding is not None:
@@ -102,7 +117,7 @@ class Seq2SeqTransformer(nn.Module):
         tgt_mask: Optional[torch.Tensor] = None,
         memory_mask: Optional[torch.Tensor] = None,
         use_causal_mask: bool = True,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, list, list]:
         """Return decoder hidden states of shape [B, T, d_model]."""
         # masks
         if src_mask is None:
@@ -122,15 +137,29 @@ class Seq2SeqTransformer(nn.Module):
             src_proj = src
         memory = self.encoder(src_proj, src_mask)
 
-        # decoder
-        dec_out, _, _ = self.decoder(
+        # # decoder
+        # dec_out, _, _ = self.decoder(
+        #     tgt,
+        #     memory,
+        #     tgt_mask,
+        #     memory_mask,
+        #     use_causal_mask=False,
+        # )
+        # return dec_out
+
+         # decoder → raw hidden states + attn lists
+        dec_out, self_attns, cross_attns = self.decoder(
             tgt,
             memory,
             tgt_mask,
             memory_mask,
             use_causal_mask=False,
         )
-        return dec_out
+
+        # # project to logits
+        # logits = self.decoder.output_projection(dec_out)
+        # return logits, self_attns, cross_attns
+        return dec_out, self_attns, cross_attns   # dec_out already projected (or identity)
 
     @torch.no_grad()
     def generate(

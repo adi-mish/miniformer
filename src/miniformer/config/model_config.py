@@ -46,6 +46,12 @@ class TransformerConfig:
         if self.activation.lower() not in valid_activations:
             raise ValueError(f"Unknown activation: {self.activation}")
 
+        if self.input_dim is not None and self.input_dim != self.d_model and self.output_dim is None:
+            raise ValueError(
+                "input_dim differs from d_model – please set output_dim explicitly "
+                "or keep input_dim == d_model."
+            )
+
         # (Removed the default-output_dim and strict input_dim==d_model checks)
 
 
