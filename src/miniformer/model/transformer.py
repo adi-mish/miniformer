@@ -18,59 +18,62 @@ class Transformer(nn.Module):
         """
         super().__init__()
 
-        # Create config if not provided
+        # Create or update config
         if config is None:
             if kwargs:
                 config = TransformerConfig(**kwargs)
             else:
                 config = TransformerConfig()
         elif kwargs:
-            # Update config with any provided kwargs
             for key, value in kwargs.items():
                 if hasattr(config, key):
                     setattr(config, key, value)
 
         self.config = config
+
+        # ✱ No local input_projection here (Encoder already handles input_dim→d_model) ✱
+        self.input_projection = None
+
         self.encoder = Encoder(config)
 
-        # output_layer is no longer used in forward, but we keep it if needed elsewhere
-        if config.output_dim is None:
-            raise ValueError("output_dim must be specified in TransformerConfig for the output layer.")
-        self.output_layer = nn.Linear(config.d_model, config.output_dim)
+        # Task head: linear only if output_dim requested, else identity
+        if config.output_dim is not None:
+            self.output_layer = nn.Linear(config.d_model, config.output_dim)
+        else:
+            self.output_layer = nn.Identity()
 
     def forward(self, x, mask=None):
         """
         Args:
-            x: Input token ids (batch_size, seq_len) or feature vectors (batch_size, seq_len, d_model)
+            x: Input token ids (batch_size, seq_len) or feature vectors (batch_size, seq_len, input_dim)
             mask: Attention mask (batch_size, 1, 1, seq_len)
 
         Returns:
-            encoded: Raw d_model embeddings (batch_size, seq_len, d_model)
+            output: Output logits or embeddings
+                    – if output_dim was set: (batch_size, seq_len, output_dim)
+                    – otherwise:       (batch_size, seq_len, d_model)
         """
-        # Build mask if not provided
+        # Build mask if not provided (padding + causal for token inputs)
         if mask is None and x is not None:
             B, S = x.shape[0], x.shape[1]
             if x.dim() == 2:
-                # padding mask: True where x != 0
                 pad_mask = (x != 0).unsqueeze(1).unsqueeze(2)                  # [B,1,1,S]
-                # causal mask: lower triangular [S,S]
-                causal = torch.tril(torch.ones(S, S, device=x.device, dtype=torch.bool))
+                causal    = torch.tril(torch.ones(S, S, device=x.device, dtype=torch.bool))
                 causal_mask = causal.unsqueeze(0).unsqueeze(0)                # [1,1,S,S]
-                mask = pad_mask & causal_mask                                 # broadcast→[B,1,S,S]
+                mask = pad_mask & causal_mask                                 # [B,1,S,S]
             else:
-                # no padding or causality needed for feature inputs
                 mask = torch.ones((B, 1, 1, S), device=x.device, dtype=torch.bool)
 
-        # Run the encoder with the combined mask → [B, S, d_model]
+        # Encode to [B, S, d_model]
         encoded = self.encoder(x, mask)
 
-        # Return raw d_model embeddings (no vocab projection)
-        return encoded
+        # Final projection or identity
+        output = self.output_layer(encoded)
+        return output
 
     def _create_mask(self, x):
         """Create a mask to hide padding tokens"""
-        mask = (x != 0).unsqueeze(1).unsqueeze(2)
-        return mask
+        return (x != 0).unsqueeze(1).unsqueeze(2)
 
     def get_attention_weights(self, x):
         """Get attention weights for visualization"""
@@ -93,15 +96,10 @@ class Transformer(nn.Module):
     @classmethod
     def from_pretrained(cls, model_dir: str) -> "Transformer":
         """Load model from directory"""
-        # Load configuration
         config_path = os.path.join(model_dir, "config.json")
         config = TransformerConfig.from_json(config_path)
 
-        # Create model with loaded config
         model = cls(config)
-
-        # Load weights
         model_path = os.path.join(model_dir, "model.pt")
         model.load_state_dict(torch.load(model_path))
-
         return model

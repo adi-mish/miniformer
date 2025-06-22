@@ -16,7 +16,7 @@ class TransformerConfig:
     n_layers: int = 3
     d_ff: int = 256
     dropout: float = 0.1
-    activation: str = "gelu"  # "gelu" or "relu"
+    activation: str = "gelu"  # "gelu", "relu", or "swiglu"
     layer_norm_eps: float = 1e-5
     max_seq_len: int = 1024
     
@@ -37,14 +37,18 @@ class TransformerConfig:
     
     def __post_init__(self):
         """Validate configuration and set defaults"""
-        # If output_dim is not specified, default to vocab_size for backwards compatibility
-        if self.output_dim is None:
-            self.output_dim = self.vocab_size
-            
-        # If input_dim is specified, ensure it's compatible with d_model
-        if self.input_dim is not None and self.input_dim != self.d_model:
-            raise ValueError(f"input_dim ({self.input_dim}) must be equal to d_model ({self.d_model})")
-    
+        # ✱ Validate d_model/n_heads ✱
+        if self.d_model % self.n_heads != 0:
+            raise ValueError(f"d_model ({self.d_model}) must be divisible by n_heads ({self.n_heads})")
+
+        # ✱ Validate activation ✱
+        valid_activations = {"gelu", "relu", "swiglu"}
+        if self.activation.lower() not in valid_activations:
+            raise ValueError(f"Unknown activation: {self.activation}")
+
+        # (Removed the default-output_dim and strict input_dim==d_model checks)
+
+
     @classmethod
     def from_dict(cls, config_dict: Dict) -> "TransformerConfig":
         """Create a configuration from a dictionary"""
