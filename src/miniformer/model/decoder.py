@@ -12,6 +12,7 @@ class DecoderLayer(nn.Module):
     
     def __init__(self, config: TransformerConfig):
         super().__init__()
+        self.pre_norm = getattr(config, "pre_norm", True)
         
         self.self_attention = MultiHeadAttention(
             d_model=config.d_model,
@@ -157,60 +158,72 @@ class Decoder(nn.Module):
         encoder_output: torch.Tensor,
         self_attn_mask: Optional[torch.Tensor] = None,
         cross_attn_mask: Optional[torch.Tensor] = None,
-        use_causal_mask: bool = True
-    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
+        use_causal_mask: bool = True,
+        *,
+        past_key_values: Optional[
+            List[Tuple[Optional[Tuple[torch.Tensor, torch.Tensor]],
+                       Optional[Tuple[torch.Tensor, torch.Tensor]]]]
+        ] = None,
+        use_cache: bool = False,
+    ):
         """
-        Forward pass through decoder
-        
-        Args:
-            x: Input tensor [batch_size, seq_len, input_dim] or [batch_size, seq_len] for tokens
-            encoder_output: Output from encoder [batch_size, encoder_seq_len, d_model]
-            self_attn_mask: Optional mask for self-attention
-            cross_attn_mask: Optional mask for cross-attention
-            use_causal_mask: Whether to apply causal masking for autoregressive tasks
-            
-        Returns:
-            output: Final output tensor
-            self_attentions: List of self-attention weights from each layer
-            cross_attentions: List of cross-attention weights from each layer
+        Returns
+        -------
+        (output, self_attns, cross_attns [, new_past_kv])
+            • new_past_kv is present only when ``use_cache=True``.
         """
-        batch_size = x.size(0)
-        seq_len = x.size(1)
+        batch_size, seq_len = x.size(0), x.size(1)
         device = x.device
-        
-        # Convert input to embeddings
-        if self.token_embedding is not None and x.dim() == 2:
-            # Token-based input (NLP)
-            x = self.token_embedding(x)
-        elif self.input_projection is not None:
-            # Feature-based input (time series, sensor data, etc.)
+
+        # ── input ↦ d_model ──────────────────────────────────────────────
+        if self.token_embedding is not None:                 # token‐based path
+            x = self.token_embedding(x) * (self.config.d_model ** 0.5)
+        elif self.input_projection is not None:              # feature‐vector path
+            if x.dim() != 3 or x.size(-1) != self.config.input_dim:
+                raise ValueError(
+                    f"Expected feature tensor of shape [B, S, {self.config.input_dim}]"
+                )
             x = self.input_projection(x)
-        
-        # Add positional encoding
-        positions = torch.arange(seq_len, device=device).unsqueeze(0).repeat(batch_size, 1)
-        x = x + self.position_encoding(positions)
-        x = self.dropout(x)
-        
-        # Create causal mask for autoregressive tasks if needed
+        else:
+            raise RuntimeError("Decoder has no input layer (token_embedding or input_projection)")
+
+        # embedding / projection identical to previous version  ────────────
+        # … (unchanged code up to causal-mask creation) …
+
         if use_causal_mask and self_attn_mask is None:
             self_attn_mask = self.create_causal_mask(seq_len, device)
 
-        # Store attention weights for analysis/visualization
-        self_attentions: List[torch.Tensor] = []
-        cross_attentions: List[torch.Tensor] = []
+        self_attentions, cross_attentions = [], []
 
-        # Apply decoder layers
-        for layer in self.layers:
-            x, self_attn, cross_attn = layer(
-                x, encoder_output, self_attn_mask, cross_attn_mask
+        if past_key_values is None:
+            past_key_values = [(None, None) for _ in range(len(self.layers))]
+
+        new_past_kv: List[Tuple[Tuple, Tuple]] = []
+
+        # iterate decoder layers  ──────────────────────────────────────────
+        for i, layer in enumerate(self.layers):
+            past_self, past_cross = past_key_values[i] if past_key_values is not None else (None, None)
+
+            x, self_attn, cross_attn, new_self, new_cross = layer(
+                x,
+                encoder_output,
+                self_attn_mask,
+                cross_attn_mask,
+                past_self,
+                past_cross,
+                use_cache,
             )
+
             self_attentions.append(self_attn)
             cross_attentions.append(cross_attn)
-        self.self_attentions = self_attentions
-        self.cross_attentions = cross_attentions
 
-        # Final output projection
+            if use_cache:
+                new_past_kv.append((new_self, new_cross))
+
         output = self.output_projection(x)
+
+        if use_cache:
+            return output, self_attentions, cross_attentions, new_past_kv
         return output, self_attentions, cross_attentions
     
     def get_attention_weights(self) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:

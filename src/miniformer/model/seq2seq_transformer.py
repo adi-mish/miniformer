@@ -78,8 +78,10 @@ class Seq2SeqTransformer(nn.Module):
 
         # Optionally tie token embeddings (weight sharing) for NLP tasks
         if share_embeddings and self.encoder.token_embedding is not None and self.decoder.token_embedding is not None:
-            self.decoder.token_embedding.weight = self.encoder.token_embedding.embedding.weight  # type: ignore[attr-defined]
-
+            # self.decoder.token_embedding.weight = self.encoder.token_embedding.embedding.weight  # type: ignore[attr-defined]
+            # tie decoder embeddings directly to encoder embeddings
+            self.decoder.token_embedding.weight = self.encoder.token_embedding.weight
+        
         # In feature‑vector mode (non‑NLP), allow *input_dim != d_model* by adding a projection layer.
         if config.input_dim is not None and config.input_dim != config.d_model:
             self._enc_input_proj = nn.Linear(config.input_dim, config.d_model)
@@ -158,11 +160,16 @@ class Seq2SeqTransformer(nn.Module):
 
         # --- decoder -------------------------------------------------------
         dec_out, self_atts, cross_atts = self.decoder(
-            tgt, memory, tgt_mask, memory_mask, use_causal_mask=False  # we already merged causal
+            tgt, memory, tgt_mask, memory_mask, use_causal_mask=False
         )
 
         # --- task head -----------------------------------------------------
-        logits = self.task_head(dec_out)
+        if self.decoder.token_embedding is not None:
+            # token-based (LM) mode: decoder.output_projection already produced vocab logits
+            logits = dec_out
+        else:
+            # feature-based mode: apply the dedicated task head
+            logits = self.task_head(dec_out)
         return logits, self_atts, cross_atts
 
     # ---------------------------------------------------------------------
@@ -188,18 +195,30 @@ class Seq2SeqTransformer(nn.Module):
         memory_mask = src_mask
 
         generated = torch.full((src.size(0), 1), bos_token_id, dtype=torch.long, device=device)
-        past_kv: Optional[List[Tuple[Tuple, Tuple]]] = None
+        # past_kv: Optional[List[Tuple[Tuple, Tuple]]] = None
+
+        # for _ in range(max_new_tokens):
+        #     tgt_mask = create_causal_mask(generated.size(1), device)
+        #     logits, _, _, past_kv = self.decoder(
+        #         generated,
+        #         memory,
+        #         tgt_mask,
+        #         memory_mask,
+        #         past_key_values=past_kv,
+        #         use_causal_mask=False,
+        #         use_cache=True,
+        #     )
+        #     next_token_logits = logits[:, -1, :] / temperature
 
         for _ in range(max_new_tokens):
             tgt_mask = create_causal_mask(generated.size(1), device)
-            logits, _, _, past_kv = self.decoder(
-                generated,
-                memory,
-                tgt_mask,
-                memory_mask,
-                past_key_values=past_kv,
-                use_causal_mask=False,
-                use_cache=True,
+            # just re-run the full decoder each time (no caching)
+            logits, _, _ = self.decoder(
+               generated,
+               memory,
+               tgt_mask,
+               memory_mask,
+               use_causal_mask=False,
             )
             next_token_logits = logits[:, -1, :] / temperature
 

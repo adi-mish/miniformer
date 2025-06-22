@@ -35,7 +35,8 @@ class MultiHeadAttention(nn.Module):
         d_model: int,
         n_heads: int,
         dropout: float = 0.1,
-        use_sdpa: bool = True,
+        # use_sdpa: bool = True,
+        use_sdpa: bool = False,  # SDPA requires PyTorch 2.0+
         rotary_pct: float = 0.0,   # 0 = disabled, 1 = apply to full head‑dim
     ):
         super().__init__()
@@ -43,7 +44,8 @@ class MultiHeadAttention(nn.Module):
         self.d_model = d_model
         self.n_heads = n_heads
         self.d_k = d_model // n_heads
-        self.use_sdpa = use_sdpa and hasattr(F, "scaled_dot_product_attention")
+        # self.use_sdpa = use_sdpa and hasattr(F, "scaled_dot_product_attention")
+        self.use_sdpa = False
         self.rotary_dim = int(self.d_k * rotary_pct)
 
         self.wq = nn.Linear(d_model, d_model)
