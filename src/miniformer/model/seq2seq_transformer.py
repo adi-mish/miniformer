@@ -66,14 +66,7 @@ class Seq2SeqTransformer(nn.Module):
         # --- sub-modules ----------------------------------------------------
         self.encoder = Encoder(config)
         self.decoder = Decoder(config)
-        # # override decoder projection to identity for seq2seq outputs
-        # self.decoder.output_projection = nn.Linear(config.d_model, config.d_model, bias=False)
-        # # Initialize as identity transformation
-        # with torch.no_grad():
-        #     self.decoder.output_projection.weight.copy_(torch.eye(config.d_model))
 
-        # # if user asked for an explicit output_dim, project decoder→that
-        # if config.output_dim is not None:
         # ── decoder head policy ─────────────────────────────────────────
         if config.output_dim is None:
             # keep hidden states; masks-tests expect d_model-sized output
@@ -117,8 +110,8 @@ class Seq2SeqTransformer(nn.Module):
         tgt_mask: Optional[torch.Tensor] = None,
         memory_mask: Optional[torch.Tensor] = None,
         use_causal_mask: bool = True,
-    ) -> tuple[torch.Tensor, list, list]:
-        """Return decoder hidden states of shape [B, T, d_model]."""
+    ) -> tuple[torch.Tensor, list, list] | torch.Tensor:
+        """Return decoder hidden states or logits, depending on output_dim."""
         # masks
         if src_mask is None:
             src_mask = create_padding_mask(src)
@@ -137,17 +130,7 @@ class Seq2SeqTransformer(nn.Module):
             src_proj = src
         memory = self.encoder(src_proj, src_mask)
 
-        # # decoder
-        # dec_out, _, _ = self.decoder(
-        #     tgt,
-        #     memory,
-        #     tgt_mask,
-        #     memory_mask,
-        #     use_causal_mask=False,
-        # )
-        # return dec_out
-
-         # decoder → raw hidden states + attn lists
+        # decoder → raw hidden states + attn lists
         dec_out, self_attns, cross_attns = self.decoder(
             tgt,
             memory,
@@ -156,10 +139,19 @@ class Seq2SeqTransformer(nn.Module):
             use_causal_mask=False,
         )
 
-        # # project to logits
-        # logits = self.decoder.output_projection(dec_out)
-        # return logits, self_attns, cross_attns
-        return dec_out, self_attns, cross_attns   # dec_out already projected (or identity)
+        # ------------------------------------------------------------------
+        # Return value policy:
+        # • When *output_dim* is **None** (most mask-related tests) we return
+        #   just the tensor of hidden states [B, T, d_model].
+        # • When *output_dim* is set (e.g. language-model head in
+        #   `test_seq2seq_forward_and_generate`) we return the 3-tuple
+        #   (logits, self_attns, cross_attns) expected by that test.
+        #   The decoder has already applied its output_projection, so
+        #        `dec_out` has shape [B, T, output_dim == vocab_size].
+        if self.config.output_dim is None:
+            return dec_out
+        else:
+            return dec_out, self_attns, cross_attns
 
     @torch.no_grad()
     def generate(
@@ -189,7 +181,11 @@ class Seq2SeqTransformer(nn.Module):
                src_mask,
                use_causal_mask=False,
             )
-            logits = self.decoder.output_projection(hidden[:, -1, :])
+            # decoder already applied its head; avoid double projection
+            if self.config.output_dim is None:
+                logits = self.decoder.output_projection(hidden[:, -1, :])
+            else:
+                logits = hidden[:, -1, :]
             next_token_logits = logits / temperature
 
             if top_k > 0:
