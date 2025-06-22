@@ -2,10 +2,6 @@
 
 A modern, production-grade Transformer implementation scaled down to run efficiently on local hardware. Miniformer balances state-of-the-art architecture with practical resource constraints while maintaining the versatility to handle various data types and tasks.
 
-<div align="center">
-  <img src="https://raw.githubusercontent.com/yourusername/miniformer/main/docs/assets/miniformer-logo.png" width="350px" alt="Miniformer Logo">
-</div>
-
 ## 🔍 Overview
 
 Miniformer implements the core principles from ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762) while incorporating modern improvements from research advances like:
@@ -169,17 +165,6 @@ Input → [Embedding/Projection + Position Encoding]
        → Output Projection
 ```
 
-## 📈 Performance
-
-### Benchmarks
-| Model Size | Parameters | Embedding Dim | Heads | Layers | Inference Time (CPU) | Memory (MB) |
-|------------|------------|---------------|-------|--------|---------------------|------------|
-| Tiny       | 3.5M      | 64            | 2     | 2      | 10ms/token         | ~15        |
-| Small      | 14M       | 128           | 4     | 4      | 25ms/token         | ~60        |
-| Base       | 40M       | 256           | 8     | 6      | 70ms/token         | ~160       |
-
-*All benchmarks performed on a MacBook Pro M1 with batch size 1, sequence length 128.*
-
 ## 🔄 Current Status and Roadmap
 
 ### Current Status
@@ -262,10 +247,6 @@ config = TransformerConfig(
     max_seq_len=2048
 )
 ```
-
-## 📚 Documentation
-
-Find comprehensive documentation [here](https://miniformer.readthedocs.io/).
 
 ## 📊 Testing
 
