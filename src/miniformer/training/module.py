@@ -1,5 +1,3 @@
-# /home/nonu_mishra/miniformer/src/miniformer/training/module.py
-
 import math
 from dataclasses import asdict
 import torch
