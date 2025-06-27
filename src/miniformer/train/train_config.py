@@ -66,4 +66,6 @@ class TrainConfig:
         # load external json overrides
         if args.config_json:
             cfg_dict.update(json.loads(open(args.config_json).read()))
+        # drop the helper key so __init__ only sees real fields
+        cfg_dict.pop("config_json", None)
         return cls(**cfg_dict)

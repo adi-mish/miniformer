@@ -14,7 +14,9 @@ class MiniFormerLitModule(L.LightningModule):
     """Wraps MiniFormer models to provide Lightning hooks."""
     def __init__(self, cfg: TrainConfig):
         super().__init__()
-        self.save_hyperparameters(asdict(cfg))
+        # let Lightning capture whatever was passed in here,
+        # whether it's a dataclass or a SimpleNamespace
+        self.save_hyperparameters()
         self.cfg = cfg
 
         if cfg.model == "seq2seq":

@@ -64,7 +64,7 @@ def main():
         precision=cfg.precision,
         accumulate_grad_batches=cfg.accumulate_grad_batches,
         gradient_clip_val=cfg.gradient_clip_val,
-        deterministic=cfg.deterministic,
+        deterministic=getattr(cfg, "deterministic", False),
         logger=logger,
         callbacks=callbacks,
         log_every_n_steps=50,
