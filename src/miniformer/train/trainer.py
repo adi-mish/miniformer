@@ -4,7 +4,7 @@ import lightning.pytorch as pl
 from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger, CSVLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 
-from .config import TrainConfig
+from .train_config import TrainConfig
 from .datamodule import MiniFormerDataModule
 from .module import MiniFormerLitModule
 

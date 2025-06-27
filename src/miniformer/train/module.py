@@ -8,7 +8,7 @@ import torchmetrics as tm
 from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
 from miniformer.model.transformer import Transformer
 from miniformer.config.model_config import TransformerConfig
-from .config import TrainConfig
+from .train_config import TrainConfig
 
 class MiniFormerLitModule(L.LightningModule):
     """Wraps MiniFormer models to provide Lightning hooks."""
