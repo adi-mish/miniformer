@@ -1,5 +1,6 @@
 import math
 from dataclasses import asdict
+from types import SimpleNamespace
 import torch
 import torch.nn.functional as F
 import lightning as L
@@ -24,11 +25,16 @@ class MiniFormerLitModule(L.LightningModule):
         else:
             self.model = Transformer(TransformerConfig(**cfg.model_config))
 
+        cfg_obj = getattr(self.model, "config", None)
+        if cfg_obj is None:
+            # whether missing or explicitly set to None, override it
+            object.__setattr__(self.model, "config", SimpleNamespace())
+
         if cfg.task == "language_modeling":
             self.val_ppl = tm.Perplexity(ignore_index=-100)
         elif cfg.task == "classification":
-            # only instantiate metrics if model provides output_dim
-            if hasattr(self.model, "config") and hasattr(self.model.config, "output_dim"):
+            # only instantiate metrics if model.config.output_dim is set
+            if hasattr(self.model.config, "output_dim"):
                 num_classes = self.model.config.output_dim
                 self.train_acc = tm.Accuracy(task="multiclass", num_classes=num_classes)
                 self.val_acc = tm.Accuracy(task="multiclass", num_classes=num_classes)
