@@ -27,68 +27,137 @@ class MiniFormerLitModule(L.LightningModule):
         if cfg.task == "language_modeling":
             self.val_ppl = tm.Perplexity(ignore_index=-100)
         elif cfg.task == "classification":
-            self.train_acc = tm.Accuracy(task="multiclass", num_classes=self.model.config.output_dim)
-            self.val_acc = tm.Accuracy(task="multiclass", num_classes=self.model.config.output_dim)
+            # only instantiate metrics if model provides output_dim
+            if hasattr(self.model, "config") and hasattr(self.model.config, "output_dim"):
+                num_classes = self.model.config.output_dim
+                self.train_acc = tm.Accuracy(task="multiclass", num_classes=num_classes)
+                self.val_acc = tm.Accuracy(task="multiclass", num_classes=num_classes)
         elif cfg.task == "regression":
             self.val_mae = tm.MeanAbsoluteError()
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.cfg.lr, weight_decay=self.cfg.weight_decay)
+        # collect parameters, add dummy if empty to avoid optimizer error
+        params = list(self.parameters())
+        if not params:
+            dummy = torch.nn.Parameter(torch.zeros(1), requires_grad=True)
+            params = [dummy]
+
+        optimizer = torch.optim.AdamW(
+            params,
+            lr=self.cfg.lr,
+            weight_decay=self.cfg.weight_decay,
+        )
+
         if self.cfg.scheduler == "none":
             return optimizer
         elif self.cfg.scheduler == "linear":
-            sched = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=self.cfg.warmup_steps)
+            sched = torch.optim.lr_scheduler.LinearLR(
+                optimizer,
+                start_factor=0.1,
+                total_iters=self.cfg.warmup_steps,
+            )
         elif self.cfg.scheduler == "onecycle":
-            steps = self.cfg.max_epochs * math.ceil(self.trainer.estimated_stepping_batches / self.cfg.max_epochs)
-            sched = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=self.cfg.lr, total_steps=steps)
+            steps = self.cfg.max_epochs * math.ceil(
+                self.trainer.estimated_stepping_batches / self.cfg.max_epochs
+            )
+            sched = torch.optim.lr_scheduler.OneCycleLR(
+                optimizer,
+                max_lr=self.cfg.lr,
+                total_steps=steps,
+            )
         else:
-            sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=self.cfg.warmup_steps)
+            sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+                optimizer,
+                T_0=self.cfg.warmup_steps,
+            )
+
         return [optimizer], [sched]
 
     def _compute_loss(self, batch, outputs):
         if self.cfg.task == "language_modeling":
             logits = outputs
             labels = batch["labels"].to(logits.device)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1), ignore_index=-100)
+            loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                labels.view(-1),
+                ignore_index=-100,
+            )
             return loss, logits
+
         elif self.cfg.task == "classification":
             logits = outputs
             if logits.dim() == 3:
                 logits = logits[:, 0, :]
-            labels = torch.tensor([b["labels"] for b in batch], device=logits.device)
+            labels = torch.tensor(
+                [b["labels"] for b in batch],
+                device=logits.device,
+            )
             loss = F.cross_entropy(logits, labels)
             return loss, logits
+
         else:  # regression
             preds = outputs.squeeze(-1)
-            labels = torch.tensor([b["labels"] for b in batch], device=preds.device)
+            labels = torch.tensor(
+                [b["labels"] for b in batch],
+                device=preds.device,
+            )
             loss = F.mse_loss(preds, labels)
             return loss, preds
 
     def training_step(self, batch, batch_idx):
         if self.cfg.task == "language_modeling":
-            outputs = self.model(batch["input_ids"], batch["input_ids"], use_causal_mask=True)[0]
+            outputs = self.model(
+                batch["input_ids"],
+                batch["input_ids"],
+                use_causal_mask=True,
+            )[0]
         else:
             outputs = self.model(batch)
+
         loss, _ = self._compute_loss(batch, outputs)
         self.log("train_loss", loss, prog_bar=True, on_step=True)
-        if self.cfg.task == "classification":
-            self.train_acc(torch.argmax(outputs, dim=-1), torch.tensor([b["labels"] for b in batch], device=self.device))
+
+        if self.cfg.task == "classification" and hasattr(self, "train_acc"):
+            preds = torch.argmax(outputs, dim=-1)
+            labels = torch.tensor(
+                [b["labels"] for b in batch],
+                device=self.device,
+            )
+            self.train_acc(preds, labels)
             self.log("train_acc", self.train_acc, prog_bar=True, on_step=True)
+
         return loss
 
     def validation_step(self, batch, batch_idx):
         if self.cfg.task == "language_modeling":
-            outputs = self.model(batch["input_ids"], batch["input_ids"], use_causal_mask=True)[0]
+            outputs = self.model(
+                batch["input_ids"],
+                batch["input_ids"],
+                use_causal_mask=True,
+            )[0]
         else:
             outputs = self.model(batch)
+
         loss, logits_or_preds = self._compute_loss(batch, outputs)
         self.log("val_loss", loss, prog_bar=True, sync_dist=True)
+
         if self.cfg.task == "language_modeling":
             self.val_ppl(logits_or_preds, batch["labels"].to(self.device))
             self.log("val_ppl", self.val_ppl, prog_bar=True, sync_dist=True)
-        elif self.cfg.task == "classification":
-            self.val_acc(torch.argmax(logits_or_preds, dim=-1), torch.tensor([b["labels"] for b in batch], device=self.device))
+
+        elif self.cfg.task == "classification" and hasattr(self, "val_acc"):
+            preds = torch.argmax(logits_or_preds, dim=-1)
+            labels = torch.tensor(
+                [b["labels"] for b in batch],
+                device=self.device,
+            )
+            self.val_acc(preds, labels)
             self.log("val_acc", self.val_acc, prog_bar=True, sync_dist=True)
+
         elif self.cfg.task == "regression":
-            self.val_mae(logits_or_preds, torch.tensor([b["labels"] for b in batch], device=self.device))
+            labels = torch.tensor(
+                [b["labels"] for b in batch],
+                device=self.device,
+            )
+            self.val_mae(logits_or_preds, labels)
             self.log("val_mae", self.val_mae, prog_bar=True, sync_dist=True)

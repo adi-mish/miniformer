@@ -29,7 +29,7 @@ class JSONLinesDataset(Dataset):
             return {"input": item["input"], "labels": torch.tensor(item["value"], dtype=torch.float)}
 
 class MiniFormerDataModule(L.LightningDataModule):
-    """Lightweight DataModule placeholder – replace with task-specific logic."""
+    """Lightweight DataModule placeholder - replace with task-specific logic."""
     def __init__(self, cfg, tokenizer=None):
         super().__init__()
         self.cfg = cfg
