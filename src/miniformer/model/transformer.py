@@ -17,7 +17,12 @@ class Transformer(nn.Module):
         """
         super().__init__()
 
-        # -------- build / patch configuration ---------------------------------
+        # ------------------------------------------------------------------
+        # Guard for mock classes in the test-suite (set early).
+        # ------------------------------------------------------------------
+        self.original_model = None
+
+        # -------- build / patch configuration -----------------------------
         if config is None:
             config = TransformerConfig(**kwargs) if kwargs else TransformerConfig()
         else:
@@ -26,15 +31,15 @@ class Transformer(nn.Module):
                     setattr(config, k, v)
         self.config = config
 
-        # -------- backbone ----------------------------------------------------
-        self.encoder = Encoder(config)                     # shared for all tasks
-        # expose encoder’s input_projection so tests can see model.input_projection
-        self.input_projection = self.encoder.input_projection
+        # -------- backbone -------------------------------------------------
+        enc = Encoder(config)              # build locally first (avoid recursion)
+        self.encoder = enc                 # register as sub-module
+        self.input_projection = enc.input_projection  # expose for tests
 
-        # -------- task head ---------------------------------------------------
-        if config.output_dim is not None:                  # explicit head
+        # -------- task head -----------------------------------------------
+        if config.output_dim is not None:          # explicit head
             self.output_layer = nn.Linear(config.d_model, config.output_dim)
-        else:                                              # heuristic default
+        else:                                      # heuristic default
             if config.input_dim is None and config.vocab_size > 256:
                 self.output_layer = nn.Linear(config.d_model, config.vocab_size)
             else:
