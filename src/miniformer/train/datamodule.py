@@ -7,8 +7,16 @@ class JSONLinesDataset(Dataset):
     """A minimal Dataset reading line-separated JSON records."""
     def __init__(self, path: str, tokenizer=None, task: str = "language_modeling"):
         super().__init__()
-        import json, pathlib
-        self.data = [json.loads(l) for l in pathlib.Path(path).read_text().splitlines()]
+        import json, pathlib, ast
+        raw = pathlib.Path(path).read_text().splitlines()
+        self.data = []
+        for idx, line in enumerate(raw):
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                # fall back to Python literal eval for single-quoted dicts
+                record = ast.literal_eval(line)
+            self.data.append(record)
         self.tokenizer = tokenizer
         self.task = task
 
@@ -17,16 +25,20 @@ class JSONLinesDataset(Dataset):
 
     def __getitem__(self, idx):
         item = self.data[idx]
+
         if self.task == "language_modeling":
             txt = item["text"]
             if self.tokenizer is None:
                 raise ValueError("Tokenizer required for LM task")
             ids = torch.tensor(self.tokenizer.encode(txt, add_special_tokens=True), dtype=torch.long)
             return {"input_ids": ids[:-1], "labels": ids[1:]}
+
         elif self.task == "classification":
             return {"input": item["input"], "labels": torch.tensor(item["label"], dtype=torch.long)}
-        else:  # regression
-            return {"input": item["input"], "labels": torch.tensor(item["value"], dtype=torch.float)}
+
+        else:  # regression – accept either `value` or `labels`
+            val = item.get("value", item.get("labels"))
+            return {"input": item["input"], "labels": torch.tensor(val, dtype=torch.float)}
 
 class MiniFormerDataModule(L.LightningDataModule):
     """Lightweight DataModule placeholder - replace with task-specific logic."""
