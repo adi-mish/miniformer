@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Convert gait CSV data to windowed JSONLines for MiniFormer regression.
 Reads input CSV, applies sliding windows, and writes JSONL with sequence inputs and next-angle labels.

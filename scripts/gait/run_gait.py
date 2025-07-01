@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Run full 10-fold leave-one-subject-out cross-validation for gait classification
 using the MiniFormer trainer. Splits data, writes per-fold configs, invokes
@@ -7,11 +6,9 @@ trainer, captures logs, and summarizes validation accuracies.
 import subprocess
 import argparse
 import json
-import os
 import re
 from pathlib import Path
 from split_gait import split_by_subject
-
 
 def run_cross_validation(data_dir, base_config_path, n_subjects=10, logs_dir=None):
     data_dir = Path(data_dir)
@@ -32,15 +29,22 @@ def run_cross_validation(data_dir, base_config_path, n_subjects=10, logs_dir=Non
         print(f"\n{'='*60}\nFold: leave out subject {subject}\n{'='*60}")
 
         # Split data for this subject
-        split_by_subject(leave_out_subject=subject)
+        split_by_subject(leave_out_subject=subject, data_dir=data_dir)
+
+        # determine where splits were written
+        # it could be data_dir/splits or data_dir/jsonl/splits
+        if (data_dir / "splits").exists():
+            split_root = data_dir / "splits"
+        else:
+            split_root = data_dir / "jsonl" / "splits"
 
         # Create per-fold config dict
         subject_config = base_config.copy()
         exp_base = base_config.get("experiment_name", "gait_miniformer")
         experiment_name = f"{exp_base}_s{subject}"
         subject_config["experiment_name"] = experiment_name
-        subject_config["train_path"] = str(data_dir / "splits" / f"train_s{subject}.jsonl")
-        subject_config["val_path"]   = str(data_dir / "splits" / f"val_s{subject}.jsonl")
+        subject_config["train_path"] = str(split_root / f"train_s{subject}.jsonl")
+        subject_config["val_path"]   = str(split_root / f"val_s{subject}.jsonl")
 
         # Write the fold-specific config to disk
         subject_cfg_path = base_config_path.parent / f"{base_config_path.stem}_s{subject}.json"
@@ -63,7 +67,6 @@ def run_cross_validation(data_dir, base_config_path, n_subjects=10, logs_dir=Non
 
         # Attempt to extract validation accuracy
         acc = None
-        # look for patterns like 'val_acc: 0.85' or 'val_accuracy=0.85'
         m = re.search(r"val_acc(?:uracy)?[\s=:]+([0-9\.]+)", result.stdout)
         if m:
             acc = float(m.group(1))
@@ -74,14 +77,12 @@ def run_cross_validation(data_dir, base_config_path, n_subjects=10, logs_dir=Non
     print(f"\n{'='*60}\nCross-validation results summary\n{'='*60}")
     for subject, acc in accuracies:
         print(f"Subject {subject}: val_acc = {acc}")
-    # compute mean across folds (ignoring None)
     valid_accs = [a for _, a in accuracies if a is not None]
     if valid_accs:
         mean_acc = sum(valid_accs) / len(valid_accs)
         print(f"Mean validation accuracy: {mean_acc:.4f}")
     else:
         print("No valid accuracies parsed.")
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -90,10 +91,10 @@ def main():
     parser.add_argument(
         "--data_dir", type=str,
         default="/home/nonu_mishra/miniformer/data/miniformer/gait",
-        help="Path to gait data directory containing gait_all.jsonl and splits/"
+        help="Path to gait data directory (containing gait_all.jsonl or a jsonl/ subfolder)"
     )
     parser.add_argument(
-        "--config", type=str,
+        "--config", dest="config_path", type=str,
         default="/home/nonu_mishra/miniformer/configs/gait_cfg.json",
         help="Path to base configuration JSON file"
     )
@@ -108,7 +109,7 @@ def main():
     args = parser.parse_args()
     run_cross_validation(
         data_dir=args.data_dir,
-        base_config_path=args.config,
+        base_config_path=args.config_path,
         n_subjects=args.n_subjects,
         logs_dir=args.logs_dir
     )
