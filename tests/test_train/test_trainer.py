@@ -47,6 +47,8 @@ def test_main_default(monkeypatch):
             calls.append(("trainer_init", kwargs))
         def fit(self, model, datamodule):
             calls.append(("fit", model, datamodule))
+        def validate(self, model, datamodule, verbose=False):
+            calls.append(("validate", model, datamodule, verbose))
         def test(self, datamodule):
             calls.append(("test", datamodule))
     monkeypatch.setattr(trainer_mod.pl, "Trainer", DummyTrainer)
@@ -66,5 +68,7 @@ def test_main_default(monkeypatch):
     assert init_kwargs["logger"] == "tb_logger"
     # fit call
     assert ("fit", dummy_model, dummy_dm) in calls
+    # validate call (always happens, even with empty cfg.test_path)
+    assert ("validate", dummy_model, dummy_dm, False) in calls
     # no test call
     assert all(c[0] != "test" for c in calls)

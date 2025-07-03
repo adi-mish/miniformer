@@ -66,12 +66,15 @@ def test_dropout_train_vs_eval():
 
 def test_mini_fit_toy_task():
     """Test that model can overfit a tiny dataset (sanity check for learning)."""
+    # make this run deterministically and disable dropout so it always overfits
+    torch.manual_seed(0)
     config = TransformerConfig(
         vocab_size=10,
         d_model=32,
         n_heads=4,
         n_layers=2,
-        output_dim=10
+        output_dim=10,
+        dropout=0.0
     )
     model = Transformer(config)
     

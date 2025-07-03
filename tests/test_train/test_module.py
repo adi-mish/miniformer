@@ -18,7 +18,8 @@ sys.path.insert(
 )
 
 import miniformer.train.module as module
-from miniformer.train.train_config import TrainConfig  # for typing only
+# Use the same TrainConfig import as used in the module
+from miniformer.train.module import TrainConfig  # for typing only
 
 # --- dummies and fixtures --------------------------------------------------
 
@@ -195,13 +196,14 @@ def test_validation_step_classification():
     logits = torch.tensor([[0.1, 0.9], [0.2, 0.8]])
     object.__setattr__(lit, "model", lambda batch: logits)
     logs = []
-    object.__setattr__(lit, "val_acc", lambda preds, labels: logs.append("val_acc_metric_called"))
-    object.__setattr__(lit, "log", lambda name, value, **kwargs: logs.append(name))
+    # patch the actual metric (val_acc), not val_accuracy
+    object.__setattr__(lit, "val_acc", lambda preds, labels: logs.append("val_accuracy_metric_called"))
+    object.__setattr__(lit, "log",     lambda name, value, **kwargs: logs.append(name))
     batch = [{"labels": 0}, {"labels": 1}]
     lit.validation_step(batch, 0)
     assert "val_loss" in logs
-    assert "val_acc_metric_called" in logs
-    assert "val_acc" in logs
+    assert "val_accuracy_metric_called" in logs
+    assert "val_accuracy" in logs
 
 def test_training_step_regression():
     cfg = cast(TrainConfig, make_cfg("regression", "none"))
