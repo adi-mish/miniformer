@@ -63,23 +63,26 @@ class DecoderLayer(nn.Module):
         if not self.pre_norm:
             x = self.norm1(x)
 
-        # --- cross ---------------------------------------------------------
+        # --- cross (no caching) ------------------------------------------
         residual = x
         if self.pre_norm:
             x_ = self.norm2(x)
         else:
             x_ = x
-        cross_out, cross_attn, new_cross = self.cross_attention(
+        # we do NOT cache encoder k/v, so pass past_kv=None and use_cache=False
+        cross_out, cross_attn, _ = self.cross_attention(
             q=x_,
             k=encoder_output,
             v=encoder_output,
             mask=cross_attn_mask,
-            past_kv=past_cross,
-            use_cache=use_cache,
+            past_kv=None,
+            use_cache=False,
         )
         x = residual + self.dropout(cross_out)
         if not self.pre_norm:
             x = self.norm2(x)
+        # new_cross is always None now
+        new_cross = None
 
         # --- ffn -----------------------------------------------------------
         residual = x
@@ -96,6 +99,8 @@ class DecoderLayer(nn.Module):
 
 class Decoder(nn.Module):
     """Transformer decoder stack supporting various data types"""
+    # allow output_projection to be any module (Linear, Identity, etc.)
+    output_projection: nn.Module
     
     def __init__(self, config: TransformerConfig):
         super().__init__()
@@ -165,67 +170,57 @@ class Decoder(nn.Module):
                        Optional[Tuple[torch.Tensor, torch.Tensor]]]]
         ] = None,
         use_cache: bool = False,
+        return_hidden: bool = False,              # ← NEW
     ):
         """
         Returns
         -------
         (output, self_attns, cross_attns [, new_past_kv])
-            • new_past_kv is present only when ``use_cache=True``.
         """
         batch_size, seq_len = x.size(0), x.size(1)
         device = x.device
 
-        # ── input ↦ d_model ──────────────────────────────────────────────
-        if self.token_embedding is not None:                 # token‐based path
+        # ── token/feature input → d_model ───────────────────────────────
+        if self.token_embedding is not None:
             x = self.token_embedding(x) * (self.config.d_model ** 0.5)
-        elif self.input_projection is not None:              # feature‐vector path
+        elif self.input_projection is not None:
             if x.dim() != 3 or x.size(-1) != self.config.input_dim:
-                raise ValueError(
-                    f"Expected feature tensor of shape [B, S, {self.config.input_dim}]"
-                )
+                raise ValueError(f"Expected feature tensor of shape [B, S, {self.config.input_dim}]")
             x = self.input_projection(x)
         else:
-            raise RuntimeError("Decoder has no input layer (token_embedding or input_projection)")
+            raise RuntimeError("Decoder has no input layer")
 
-        # embedding / projection identical to previous version  ────────────
-        # … (unchanged code up to causal-mask creation) …
+        # positional encodings ------------------------------------------------
+        positions = torch.arange(seq_len, device=device).unsqueeze(0).expand(batch_size, seq_len)
+        x = self.dropout(x + self.position_encoding(positions))
 
         if use_causal_mask and self_attn_mask is None:
             self_attn_mask = self.create_causal_mask(seq_len, device)
 
         self_attentions, cross_attentions = [], []
-
         if past_key_values is None:
             past_key_values = [(None, None) for _ in range(len(self.layers))]
-
         new_past_kv: List[Tuple[Tuple, Tuple]] = []
 
-        # iterate decoder layers  ──────────────────────────────────────────
+        # ── transformer layers ───────────────────────────────────────────
         for i, layer in enumerate(self.layers):
-            past_self, past_cross = past_key_values[i] if past_key_values is not None else (None, None)
-
+            past_self, past_cross = past_key_values[i]
             x, self_attn, cross_attn, new_self, new_cross = layer(
-                x,
-                encoder_output,
-                self_attn_mask,
-                cross_attn_mask,
-                past_self,
-                past_cross,
-                use_cache,
+                x, encoder_output,
+                self_attn_mask, cross_attn_mask,
+                past_self, past_cross, use_cache,
             )
-
             self_attentions.append(self_attn)
             cross_attentions.append(cross_attn)
-
             if use_cache:
                 new_past_kv.append((new_self, new_cross))
 
-        output = self.output_projection(x)
+        # ── final projection (optional) ──────────────────────────────────
+        output = x if return_hidden else self.output_projection(x)
 
-        if use_cache:
-            return output, self_attentions, cross_attentions, new_past_kv
-        return output, self_attentions, cross_attentions
-    
+        return (output, self_attentions, cross_attentions, new_past_kv) if use_cache \
+               else (output, self_attentions, cross_attentions)
+
     def get_attention_weights(self) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
         """Get attention weights from the last forward pass"""
         # This would need to be called after a forward pass

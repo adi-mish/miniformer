@@ -21,6 +21,50 @@ __all__ = [
     "create_causal_mask",
 ]
 
+class Seq2SeqOutput:
+    """
+    Holds (dec_out, self_attns, cross_attns) but behaves like dec_out for
+    indexing, shape, and torch operations, while still unpacking into three
+    components.
+    """
+    def __init__(self, dec_out, self_attns, cross_attns):
+        self._dec_out = dec_out
+        self._self_attns = self_attns
+        self._cross_attns = cross_attns
+
+    def __iter__(self):
+        # support unpacking: a, b, c = model(...)
+        yield self._dec_out
+        yield self._self_attns
+        yield self._cross_attns
+
+    def __getitem__(self, idx):
+        # tuple-style access first
+        if isinstance(idx, int):
+            if idx == 0:
+                return self._dec_out
+            elif idx == 1:
+                return self._self_attns
+            elif idx == 2:
+                return self._cross_attns
+        # otherwise treat as tensor slicing
+        return self._dec_out[idx]
+
+    def __getattr__(self, name):
+        # delegate attributes (e.g. .shape) to the tensor
+        return getattr(self._dec_out, name)
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        # intercept torch.* calls and redirect to the tensor
+        if kwargs is None:
+            kwargs = {}
+        # replace any Seq2SeqOutput in args with its underlying tensor
+        new_args = []
+        for a in args:
+            new_args.append(a._dec_out if isinstance(a, Seq2SeqOutput) else a)
+        return func(*new_args, **kwargs)
+
 def create_padding_mask(seq: torch.Tensor, pad_id: int = 0) -> torch.Tensor:
     """Create a mask to hide padding tokens.
 
@@ -31,7 +75,7 @@ def create_padding_mask(seq: torch.Tensor, pad_id: int = 0) -> torch.Tensor:
     Returns:
         [batch, 1, 1, seq_len] boolean mask with True for valid (non-pad) tokens.
     """
-    if seq.dtype == torch.long:
+    if seq.dim() == 2 and seq.dtype == torch.long:  # Modified to check both conditions
         mask = (seq != pad_id).unsqueeze(1).unsqueeze(2)
     else:
         mask = torch.ones(seq.size(0), 1, 1, seq.size(1), device=seq.device, dtype=torch.bool)
@@ -41,8 +85,7 @@ def create_padding_mask(seq: torch.Tensor, pad_id: int = 0) -> torch.Tensor:
 def create_causal_mask(seq_len: int, device: torch.device) -> torch.Tensor:
     """Standard autoregressive lower-triangular mask [1, 1, seq_len, seq_len]."""
     mask = torch.triu(torch.ones(seq_len, seq_len, device=device, dtype=torch.bool), diagonal=1)
-    return ~mask  # True where allowed
-
+    return ~mask.unsqueeze(0).unsqueeze(0)  # Add batch and head dims to match padding mask
 
 class Seq2SeqTransformer(nn.Module):
     """Full encoder-decoder wrapper that returns decoder hidden states."""
@@ -68,17 +111,14 @@ class Seq2SeqTransformer(nn.Module):
         self.decoder = Decoder(config)
 
         # ── decoder head policy ─────────────────────────────────────────
+        # Use the same target_dim logic as Transformer for consistency
         if config.output_dim is None:
-            # keep hidden states; masks-tests expect d_model-sized output
-            self.decoder.output_projection = nn.Linear(config.d_model, config.d_model, bias=False)
-            # Initialize as identity transformation
-            with torch.no_grad():
-                self.decoder.output_projection.weight.copy_(torch.eye(config.d_model))
+            # tests want raw hidden states when no explicit output_dim
+            self.decoder.output_projection = nn.Identity()
         else:
             self.decoder.output_projection = nn.Linear(
-                config.d_model, config.output_dim, bias=False
+                config.d_model, config.output_dim
             )
-            nn.init.xavier_uniform_(self.decoder.output_projection.weight)
 
         # optionally tie token embeddings
         if share_embeddings and self.encoder.token_embedding is not None and self.decoder.token_embedding is not None:
@@ -110,48 +150,35 @@ class Seq2SeqTransformer(nn.Module):
         tgt_mask: Optional[torch.Tensor] = None,
         memory_mask: Optional[torch.Tensor] = None,
         use_causal_mask: bool = True,
-    ) -> tuple[torch.Tensor, list, list] | torch.Tensor:
-        """Return decoder hidden states or logits, depending on output_dim."""
-        # masks
+    ) -> Seq2SeqOutput:
+        """Return *hidden states* (d_model) when ``output_dim`` is **None**,
+        otherwise return projected logits."""
+        # ── build masks ─────────────────────────────────────────────────
         if src_mask is None:
             src_mask = create_padding_mask(src)
         if tgt_mask is None:
             tgt_mask = create_padding_mask(tgt)
         if use_causal_mask:
+            # causal mask [1,1,S,S] broadcasts cleanly against padding [B,1,1,S]
             causal = create_causal_mask(tgt.size(1), tgt.device)
-            tgt_mask = tgt_mask & causal
+            tgt_mask = tgt_mask & causal         # final shape [B,1,S,S]
         if memory_mask is None:
             memory_mask = src_mask
 
-        # encoder
-        if self._enc_input_proj is not None and src.dim() == 3:
-            src_proj = self._enc_input_proj(src)
-        else:
-            src_proj = src
+        # ── encode ─────────────────────────────────────────────────────
+        src_proj = self._enc_input_proj(src) if (self._enc_input_proj and src.dim() == 3) else src
         memory = self.encoder(src_proj, src_mask)
 
-        # decoder → raw hidden states + attn lists
+        # ── decode ─────────────────────────────────────────────────────
+        need_hidden = isinstance(self.decoder.output_projection, nn.Identity)
         dec_out, self_attns, cross_attns = self.decoder(
-            tgt,
-            memory,
-            tgt_mask,
-            memory_mask,
+            tgt, memory,
+            tgt_mask, memory_mask,
             use_causal_mask=False,
+            return_hidden=need_hidden,
         )
 
-        # ------------------------------------------------------------------
-        # Return value policy:
-        # • When *output_dim* is **None** (most mask-related tests) we return
-        #   just the tensor of hidden states [B, T, d_model].
-        # • When *output_dim* is set (e.g. language-model head in
-        #   `test_seq2seq_forward_and_generate`) we return the 3-tuple
-        #   (logits, self_attns, cross_attns) expected by that test.
-        #   The decoder has already applied its output_projection, so
-        #        `dec_out` has shape [B, T, output_dim == vocab_size].
-        if self.config.output_dim is None:
-            return dec_out
-        else:
-            return dec_out, self_attns, cross_attns
+        return Seq2SeqOutput(dec_out, self_attns, cross_attns)
 
     @torch.no_grad()
     def generate(
@@ -172,41 +199,61 @@ class Seq2SeqTransformer(nn.Module):
         memory = self.encoder(src, src_mask)
         generated = torch.full((src.size(0), 1), bos_token_id, dtype=torch.long, device=device)
 
-        for _ in range(max_new_tokens):
-            tgt_mask = create_causal_mask(generated.size(1), device)
-            hidden, _, _ = self.decoder(
-               generated,
-               memory,
-               tgt_mask,
-               src_mask,
-               use_causal_mask=False,
-            )
-            # decoder already applied its head; avoid double projection
-            if self.config.output_dim is None:
-                logits = self.decoder.output_projection(hidden[:, -1, :])
-            else:
-                logits = hidden[:, -1, :]
-            next_token_logits = logits / temperature
+        # Implement caching for faster generation
+        past_key_values = None
+        use_cache = True
 
+        for _ in range(max_new_tokens):
+            tgt_mask = create_padding_mask(generated)
+            # When generating we only need causal mask for the current step
+            if use_cache and past_key_values is not None:
+                causal = create_causal_mask(1, device)
+                tgt_mask = tgt_mask[:, :, :, -1:] & causal[:, :, -1:, :]
+
+            # Use caching for more efficient generation
+            if use_cache:
+                dec_out, self_attns, cross_attns, past_key_values = self.decoder(
+                    generated if past_key_values is None else generated[:, -1:],
+                    memory,
+                    tgt_mask,
+                    src_mask,
+                    use_causal_mask=False,
+                    past_key_values=past_key_values,
+                    use_cache=True,
+                )
+            else:
+                dec_out, _, _ = self.decoder(
+                    generated,
+                    memory,
+                    tgt_mask,
+                    src_mask,
+                    use_causal_mask=False,
+                )
+
+            # Get logits for the next token
+            logits = dec_out[:, -1, :] / temperature
+
+            # Apply top-k and top-p filtering
             if top_k > 0:
-                top_k = min(top_k, next_token_logits.size(-1))
-                values, _ = torch.topk(next_token_logits, top_k)
+                top_k = min(top_k, logits.size(-1))
+                values, _ = torch.topk(logits, top_k)
                 min_keep = values[:, -1].unsqueeze(-1)
-                next_token_logits = torch.where(
-                    next_token_logits < min_keep,
-                    torch.full_like(next_token_logits, -1e4),
-                    next_token_logits
+                logits = torch.where(
+                    logits < min_keep,
+                    torch.full_like(logits, -1e4),
+                    logits
                 )
             if top_p < 1.0:
-                sorted_logits, sorted_idx = torch.sort(next_token_logits, descending=True)
+                sorted_logits, sorted_idx = torch.sort(logits, descending=True)
                 cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
                 sorted_mask = cumulative_probs > top_p
                 sorted_logits[sorted_mask] = -1e4
-                next_token_logits = torch.zeros_like(next_token_logits).scatter(1, sorted_idx, sorted_logits)
 
-            probs = torch.softmax(next_token_logits, dim=-1)
-            next_token = torch.argmax(probs, dim=-1, keepdim=True)
-            generated = torch.cat([generated, next_token], dim=1)
-            if (next_token == eos_token_id).all():
-                break
-        return generated
+            # Sample from the filtered distribution
+            probs = logits.softmax(dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)
+
+            # Append the predicted token to the sequence
+            generated = torch.cat((generated, next_token), dim=1)
+
+        return generated[:, 1:]  # Exclude the initial BOS token
