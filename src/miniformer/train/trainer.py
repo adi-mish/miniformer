@@ -72,6 +72,7 @@ def main():
 
     # Fit (and optionally test)
     trainer.fit(model, datamodule=datamodule)
+    val_metrics = trainer.validate(model, datamodule=datamodule, verbose=False)
     if cfg.test_path:
         trainer.test(datamodule=datamodule)
 
