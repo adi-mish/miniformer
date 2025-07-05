@@ -40,7 +40,7 @@ def main():
     callbacks = []
     ckpt_cb = ModelCheckpoint(
         dirpath=os.path.join(cfg.work_dir, cfg.experiment_name, "checkpoints"),
-        filename="{epoch}-{val_loss:.3f}-{val_acc:.3f}",
+        filename="{epoch}-{val_loss:.3f}-{val_mae:.3f}",
         monitor=cfg.checkpoint_metric,
         mode="min" if "loss" in cfg.checkpoint_metric else "max",
         save_top_k=1,

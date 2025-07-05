@@ -86,15 +86,47 @@ class MiniFormerDataModule(L.LightningDataModule):
         )
 
     def _collate_fn(self, batch):
-        if self.cfg.task == "language_modeling":
-            lengths = [b["input_ids"].size(0) for b in batch]
-            max_len = max(lengths)
-            input_ids = torch.zeros(len(batch), max_len, dtype=torch.long)
-            labels = torch.zeros(len(batch), max_len, dtype=torch.long) - 100
+        """
+        Unit tests expect three different behaviours:
+
+        • language_modeling  – return a dict with padded Long tensors
+        • classification/regression when input is a *string*  – **return the raw list** unchanged
+        • classification/regression when input is a list[dict] of numeric features –
+        return padded float tensors (keep the code you already wrote).
+
+        Anything else falls back to the raw list.
+        """
+        task = self.cfg.task
+
+        # ------------------------------------------------------------------ 1. LM
+        if task == "language_modeling":
+            lengths  = [b["input_ids"].size(0) for b in batch]
+            max_len  = max(lengths)
+            input_ids = torch.full((len(batch), max_len), 0, dtype=torch.long)
+            labels    = torch.full_like(input_ids, -100)
             for i, b in enumerate(batch):
                 l = lengths[i]
                 input_ids[i, :l] = b["input_ids"]
-                labels[i, :l] = b["labels"]
+                labels[i,   :l]  = b["labels"]
             return {"input_ids": input_ids, "labels": labels}
-        else:
-            return batch
+
+        # ---------------------------------------------------- 2. string inputs → return list
+        if task in {"classification", "regression"} and isinstance(batch[0]["input"], str):
+            return batch                                           # ← unit-test expects list
+
+        # ------------------------------------------------ 3. numeric sequence features (your code)
+        if task in {"classification", "regression"}:
+            seq_lens  = [len(s["input"]) for s in batch]
+            max_len   = max(seq_lens)
+            feat_keys = list(batch[0]["input"][0].keys())
+            feat_dim  = len(feat_keys)
+
+            x = torch.zeros(len(batch), max_len, feat_dim, dtype=torch.float32)
+            y = torch.tensor([b["labels"] for b in batch])
+            for i, sample in enumerate(batch):
+                seq = torch.tensor([[step[k] for k in feat_keys] for step in sample["input"]])
+                x[i, : seq.size(0)] = seq
+            return {"input": x, "labels": y}
+
+        # ---------------------------------------------------------- fallback (safety-net)
+        return batch

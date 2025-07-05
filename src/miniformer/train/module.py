@@ -66,7 +66,7 @@ from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
 
 class MiniFormerLitModule(L.LightningModule):
     """Wraps MiniFormer models to provide Lightning hooks."""
-    def __init__(self, cfg: TrainConfig):
+    def __init__(self, cfg):
         super().__init__()
         import weakref, torch  # new import needed inside the function
 
@@ -125,6 +125,29 @@ class MiniFormerLitModule(L.LightningModule):
         Convert a list of {"input": str|Tensor, "labels": Tensor}
         into two padded tensors: input_ids (B, S) and labels.
         """
+        # ── 1. raw string-input batches ──────────────
+        if (
+            isinstance(batch, list)
+            and isinstance(batch[0], dict)
+            and "input" in batch[0]
+            and isinstance(batch[0]["input"], str)
+        ):
+            # simple character-level tokenizer (works for tests)
+            tokenised = [torch.tensor([ord(c) % self.cfg.model_config["vocab_size"]
+                                    for c in sample["input"]], dtype=torch.long)
+                        for sample in batch]
+
+            max_len = max(t.size(0) for t in tokenised)
+            input_ids = torch.zeros(len(batch), max_len, dtype=torch.long)
+            for i, ids in enumerate(tokenised):
+                input_ids[i, : ids.size(0)] = ids
+
+            labels = torch.tensor([s["labels"] for s in batch])        # long or float OK
+            return input_ids, labels                                    # shapes: (B, S) & (B,)
+
+        if isinstance(batch, dict) and "input" in batch and isinstance(batch["input"], torch.Tensor):
+            return batch["input"].to(self.device), batch["labels"].to(self.device)
+
         # 1. Already preprocessed for LM task
         if isinstance(batch, dict) and "input_ids" in batch:
             return batch["input_ids"], batch["labels"]
