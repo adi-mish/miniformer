@@ -33,6 +33,8 @@ def split_by_subject(
         for line in f:
             rec = json.loads(line)
             subj = rec.get("meta", {}).get("subject")
+            if subj is None:
+                raise KeyError("Record missing meta.subject – regenerate JSONL with convert_gait.py ≥ v2")
             if subj == leave_out_subject:
                 val.append(rec)
             else:

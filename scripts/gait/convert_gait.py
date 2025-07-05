@@ -60,12 +60,23 @@ def main():
             # Slide window
             for start in range(0, len(angles) - args.window_size - args.predict_horizon + 1, args.stride):
                 window = grp.iloc[start:start + args.window_size]
+                m = window.iloc[0]                         # first row of the window
+                meta = {
+                    "subject"   : int(m["subject"]),
+                    "condition" : m["condition"],
+                    "replication": int(m["replication"]),
+                    "leg"       : m["leg"],
+                    "joint"     : m["joint"],
+                }
                 # Sequence of features per time step
                 features_seq = window[group_cols + ["time"]].to_dict(orient="records")
                 # Predict target angle at horizon
-                target_idx = start + args.window_size + args.predict_horizon - 1
+                target_idx   = start + args.window_size + args.predict_horizon - 1
                 target_angle = float(angles[target_idx])
-                record = {"input": features_seq, "value": target_angle}
+
+                record = {"input": features_seq,
+                          "value": target_angle,
+                          "meta" : meta}      # ← so split_gait can see subject ▼
                 f_out.write(json.dumps(record) + "\n")
                 count += 1
 

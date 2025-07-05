@@ -95,7 +95,7 @@ def main():
     )
     parser.add_argument(
         "--config", dest="config_path", type=str,
-        default="/home/nonu_mishra/miniformer/configs/gait_cfg.json",
+        default="/home/nonu_mishra/miniformer/configs/gait/gait_cfg.json",
         help="Path to base configuration JSON file"
     )
     parser.add_argument(
