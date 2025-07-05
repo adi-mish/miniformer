@@ -65,13 +65,22 @@ def run_cross_validation(data_dir, base_config_path, n_subjects=10, logs_dir=Non
             lf.write(result.stdout)
             lf.write("\n" + result.stderr)
 
-        # Attempt to extract validation accuracy
-        acc = None
-        m = re.search(r"val_acc(?:uracy)?[\s=:]+([0-9\.]+)", result.stdout)
-        if m:
-            acc = float(m.group(1))
-        accuracies.append((subject, acc))
-        print(f"Subject {subject} ➜ validation accuracy = {acc}\n")
+        # Pick metric name by task  -----------------------------------------
+        task = subject_config["task"]
+        if task == "classification":
+            pattern = r"val_acc(?:uracy)?[\s=:]+([0-9\.]+)"
+            metric_name = "val_accuracy"
+        elif task == "regression":
+            pattern = r"val_mae[\s=:]+([0-9\.]+)"
+            metric_name = "val_mae"
+        else:                            # language_modeling
+            pattern = r"val_ppl[\s=:]+([0-9\.]+)"
+            metric_name = "val_ppl"
+
+        m = re.search(pattern, result.stdout)
+        val_metric = float(m.group(1)) if m else None
+        accuracies.append((subject, val_metric))
+        print(f"Subject {subject} ➜ {metric_name} = {val_metric}\n")
 
     # Summarize all folds
     print(f"\n{'='*60}\nCross-validation results summary\n{'='*60}")
