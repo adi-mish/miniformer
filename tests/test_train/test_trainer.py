@@ -34,21 +34,41 @@ def test_main_default(monkeypatch):
     dummy_model = object()
     monkeypatch.setattr(trainer_mod, "MiniFormerDataModule", lambda cfg, tok: dummy_dm)
     monkeypatch.setattr(trainer_mod, "MiniFormerLitModule", lambda cfg: dummy_model)
-    # patch loggers
-    monkeypatch.setattr(trainer_mod, "TensorBoardLogger", lambda work_dir, name: "tb_logger")
-    monkeypatch.setattr(trainer_mod, "WandbLogger", lambda project, save_dir: "wb_logger")
-    monkeypatch.setattr(trainer_mod, "CSVLogger", lambda work_dir, name: "csv_logger")
+    # patch loggers - need to match the actual function signatures
+    class DummyLogger:
+
+        def __init__(self, *args, **kwargs):
+            self.log_dir = "/fake/log/dir/version_0"
+
+        def __str__(self):
+            return "tb_logger"
+
+    def create_logger(*args, **kwargs):
+        return DummyLogger()
+    
+    monkeypatch.setattr(trainer_mod, "TensorBoardLogger", create_logger)
+    monkeypatch.setattr(trainer_mod, "WandbLogger", create_logger)
+    monkeypatch.setattr(trainer_mod, "CSVLogger", create_logger)
     # patch callbacks
-    monkeypatch.setattr(trainer_mod, "ModelCheckpoint", lambda **kwargs: "ckpt_cb")
+
+    def create_callback(**kwargs):
+        return "ckpt_cb"
+    
+    monkeypatch.setattr(trainer_mod, "ModelCheckpoint", create_callback)
     monkeypatch.setattr(trainer_mod, "EarlyStopping", lambda **kwargs: "es_cb")
     # dummy Trainer
+
     class DummyTrainer:
+
         def __init__(self, **kwargs):
             calls.append(("trainer_init", kwargs))
+
         def fit(self, model, datamodule):
             calls.append(("fit", model, datamodule))
+
         def validate(self, model, datamodule, verbose=False):
             calls.append(("validate", model, datamodule, verbose))
+
         def test(self, datamodule):
             calls.append(("test", datamodule))
     monkeypatch.setattr(trainer_mod.pl, "Trainer", DummyTrainer)
@@ -65,7 +85,7 @@ def test_main_default(monkeypatch):
     assert init_kwargs["max_epochs"] == cfg.max_epochs
     assert init_kwargs["accelerator"] == "cpu"
     assert init_kwargs["devices"] == 1
-    assert init_kwargs["logger"] == "tb_logger"
+    assert str(init_kwargs["logger"]) == "tb_logger"
     # fit call
     assert ("fit", dummy_model, dummy_dm) in calls
     # validate call (always happens, even with empty cfg.test_path)

@@ -28,7 +28,7 @@ def main():
 
     # Logger
     if cfg.logger == "tensorboard":
-        logger = TensorBoardLogger(cfg.work_dir, name=cfg.experiment_name)
+        logger = TensorBoardLogger(save_dir=cfg.work_dir, name=cfg.experiment_name)
     elif cfg.logger == "wandb":
         logger = WandbLogger(project=cfg.experiment_name, save_dir=cfg.work_dir)
     elif cfg.logger == "csv":
@@ -36,14 +36,34 @@ def main():
     else:
         logger = False  # disable logging
 
-    # Callbacks
+    # ------------------ Checkpoint filename that only uses logged metrics ------------------
+    def _build_ckpt_filename(cfg):
+        # Always include epoch
+        pieces = ["{epoch}"]
+        # Always include the metric we monitor
+        pieces.append(f"{{{cfg.checkpoint_metric}:.3f}}")
+        # Add val_mae only if task=="regression"
+        if cfg.task == "regression":
+            pieces.append("{val_mae:.3f}")
+        return "-".join(pieces)
+
     callbacks = []
+    # Use the logger's log_dir (includes version_XX) when available; else fall back
+    if logger and hasattr(logger, 'log_dir') and logger.log_dir:
+        ckpt_root = logger.log_dir
+    else:
+        ckpt_root = os.path.join(cfg.work_dir, cfg.experiment_name,
+                                 "version_manual")
+    ckpt_dir = os.path.join(ckpt_root, "checkpoints")
+
     ckpt_cb = ModelCheckpoint(
-        dirpath=os.path.join(cfg.work_dir, cfg.experiment_name, "checkpoints"),
-        filename="{epoch}-{val_loss:.3f}-{val_mae:.3f}",
+        dirpath=ckpt_dir,
+        filename=_build_ckpt_filename(cfg),
         monitor=cfg.checkpoint_metric,
         mode="min" if "loss" in cfg.checkpoint_metric else "max",
-        save_top_k=1,
+        save_top_k=3,            # keep a few best checkpoints
+        save_last=True,          # also save the very last one
+        auto_insert_metric_name=False
     )
     callbacks.append(ckpt_cb)
 
@@ -59,7 +79,8 @@ def main():
     # Trainer
     trainer = pl.Trainer(
         max_epochs=cfg.max_epochs,
-        accelerator="gpu" if torch.cuda.is_available() and cfg.gpus > 0 else "cpu",
+        accelerator=("gpu" if torch.cuda.is_available() and cfg.gpus > 0
+                     else "cpu"),
         devices=cfg.gpus if cfg.gpus > 0 else 1,
         precision=cfg.precision,
         accumulate_grad_batches=cfg.accumulate_grad_batches,
@@ -72,9 +93,10 @@ def main():
 
     # Fit (and optionally test)
     trainer.fit(model, datamodule=datamodule)
-    val_metrics = trainer.validate(model, datamodule=datamodule, verbose=False)
+    trainer.validate(model, datamodule=datamodule, verbose=False)
     if cfg.test_path:
         trainer.test(datamodule=datamodule)
+
 
 if __name__ == "__main__":
     main()
