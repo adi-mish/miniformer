@@ -1,8 +1,37 @@
-# Miniformer
+# Miniformer: Lightweight Transformer Models for Efficient Deep Learning
 
-Production-grade Transformer implementations, scaled down for efficient local development.
+[![PyPI version](https://badge.fury.io/py/miniformer.svg)](https://badge.fury.io/py/miniformer)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-%23EE4C2C.svg?&logo=PyTorch&logoColor=white)](https://pytorch.org/)
 
----
+**Miniformer** is a production-grade Transformer implementation scaled down for efficient local development and edge deployment. It provides a flexible, lightweight foundation for transformer-based NLP models that can run efficiently on consumer hardware for both training and inference.
+
+## 🚀 Key Features
+
+- **Lightweight & Efficient**: Optimized transformer architecture that runs on consumer hardware
+- **Production-Ready**: Stable, tested implementation with proper initialization and normalization
+- **Flexible Architecture**: Modular design with swappable attention mechanisms and position encodings
+- **PyTorch Lightning Integration**: Built-in training, logging, and optimization utilities
+- **Edge-Deployment Ready**: Inference optimization with KV-cache support for fast generation
+- **Educational**: Clean implementation for learning transformer architecture internals
+
+## 🧠 Use Cases
+
+- Run transformer models on edge devices or limited hardware
+- Prototype NLP applications with minimal resources
+- Learn transformer internals with clean, well-documented code
+- Build foundation models for language modeling, classification, regression and seq2seq tasks
+
+## ⚡ Quick Installation
+
+```bash
+git clone https://github.com/adi-mish/miniformer.git
+cd miniformer
+pip install -e .
+# for all dependencies
+pip install -e ".[all]"
+```
 
 ## Table of Contents
 
@@ -76,7 +105,7 @@ Miniformer implements core Transformer architectures ("Attention Is All You Need
 ## Installation
 
 ```bash
-git clone https://github.com/yourusername/miniformer.git
+git clone https://github.com/adi-mish/miniformer.git
 cd miniformer
 pip install -e .
 # for development dependencies
