@@ -56,13 +56,30 @@ Clone and install dependencies. You'll need Python 3.9+ and PyTorch 2.0+:
 ```bash
 git clone https://github.com/adi-mish/miniformer.git
 cd miniformer
-pip install -e .
+poetry install
 ```
 
-For development with all testing tools:
+For development with additional tools like linting and documentation:
 
 ```bash
-pip install -e ".[dev]"
+poetry install --extras "dev docs"
+# Or install all optional dependencies
+poetry install --all-extras
+```
+
+To run commands in the Poetry environment:
+
+```bash
+poetry shell  # Activate the virtual environment
+# OR
+poetry run python -m miniformer.train.trainer --help  # Run commands directly
+```
+
+**Alternative installation with pip**: If you prefer not to use Poetry, you can install with pip, though Poetry is recommended for development:
+
+```bash
+pip install -e .              # Basic installation
+pip install -e ".[dev,docs]"  # With development dependencies
 ```
 
 ## Project Layout
@@ -102,7 +119,8 @@ miniformer/
 The simplest way to train a model is through the CLI. Here's a language modeling example:
 
 ```bash
-python -m miniformer.train.trainer \
+# Using Poetry (recommended)
+poetry run python -m miniformer.train.trainer \
   --train_path data/train.jsonl \
   --val_path data/val.jsonl \
   --task language_modeling \
@@ -117,12 +135,18 @@ python -m miniformer.train.trainer \
   --logger tensorboard \
   --work_dir "./runs" \
   --experiment_name "my_lm"
+
+# Or if you've activated the Poetry shell with `poetry shell`
+python -m miniformer.train.trainer \
+  --train_path data/train.jsonl \
+  --val_path data/val.jsonl \
+  # ... same arguments as above
 ```
 
 For classification tasks, swap the task and model config:
 
 ```bash
-python -m miniformer.train.trainer \
+poetry run python -m miniformer.train.trainer \
   --train_path data/classification_train.jsonl \
   --val_path data/classification_val.jsonl \
   --task classification \
@@ -391,18 +415,18 @@ I wrote a fairly comprehensive test suite to catch regressions. Run it with:
 
 ```bash
 # All tests
-pytest tests/
+poetry run pytest tests/
 
 # With coverage
-pytest tests/ --cov=miniformer
+poetry run pytest tests/ --cov=miniformer
 
 # Specific test groups
-pytest tests/test_model/      # Model architecture tests
-pytest tests/test_train/      # Training pipeline tests
-pytest tests/test_integration/ # End-to-end tests
+poetry run pytest tests/test_model/      # Model architecture tests
+poetry run pytest tests/test_train/      # Training pipeline tests
+poetry run pytest tests/test_integration/ # End-to-end tests
 
 # Pattern matching
-pytest tests/ -k "attention"  # Only attention-related tests
+poetry run pytest tests/ -k "attention"  # Only attention-related tests
 ```
 
 The tests cover:
