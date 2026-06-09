@@ -4,6 +4,7 @@ from typing import Optional
 import pytest
 import torch
 
+from miniformer.data.preprocessing import collate_records
 from miniformer.train.module import MiniFormerModule
 
 
@@ -74,7 +75,8 @@ def test_compute_loss_lm():
 def test_compute_loss_classification():
     module = MiniFormerModule(make_cfg("classification", "none"))
     logits = torch.randn(2, 4)
-    loss, out = module._compute_loss([{"labels": 0}, {"labels": 1}], logits)
+    labels = torch.tensor([0, 1])
+    loss, out = module._compute_loss((labels,), logits)
     assert loss.item() >= 0
     assert out.shape == (2, 4)
 
@@ -82,24 +84,45 @@ def test_compute_loss_classification():
 def test_compute_loss_regression():
     module = MiniFormerModule(make_cfg("regression", "none"))
     preds = torch.tensor([[2.0], [3.0]])
-    loss, out = module._compute_loss([{"labels": 1.0}, {"labels": 3.0}], preds)
+    labels = torch.tensor([1.0, 3.0])
+    loss, out = module._compute_loss((labels,), preds)
     assert out.squeeze().tolist() == pytest.approx([2.0, 3.0])
     assert loss.item() == pytest.approx(0.5)
 
 
 def test_training_step_classification_uses_real_model():
     module = MiniFormerModule(make_cfg("classification", "none"))
-    batch = [{"input": "aa", "labels": 0}, {"input": "bb", "labels": 1}]
+    batch = collate_records(
+        [{"input": "aa", "labels": 0}, {"input": "bb", "labels": 1}],
+        task="classification",
+        vocab_size=20,
+    )
     loss = module.training_step(batch, 0)
     assert isinstance(loss, torch.Tensor)
     assert loss.requires_grad
 
 
-def test_empty_string_batch_raises_clear_error():
+def test_raw_records_are_rejected_by_training_module():
     module = MiniFormerModule(make_cfg("classification", "none"))
 
+    with pytest.raises(TypeError, match="tensor batch dictionary"):
+        module.training_step([{"input": "aa", "labels": 0}], 0)
+
+
+def test_empty_string_batch_raises_clear_preprocessing_error():
     with pytest.raises(ValueError, match="must not be empty"):
-        module.training_step([{"input": "", "labels": 0}], 0)
+        collate_records(
+            [{"input": "", "labels": 0}],
+            task="classification",
+            vocab_size=20,
+        )
+
+
+def test_training_module_rejects_unprocessed_text_batch():
+    module = MiniFormerModule(make_cfg("classification", "none"))
+
+    with pytest.raises(TypeError, match="Raw text"):
+        module.training_step({"input": "", "labels": torch.tensor([0])}, 0)
 
 
 def test_non_lm_training_defaults_to_bidirectional_attention():
@@ -133,7 +156,11 @@ def test_non_lm_task_requires_output_dim():
 
 def test_validation_step_returns_metrics():
     module = MiniFormerModule(make_cfg("classification", "none"))
-    batch = [{"input": "aa", "labels": 0}, {"input": "bb", "labels": 1}]
+    batch = collate_records(
+        [{"input": "aa", "labels": 0}, {"input": "bb", "labels": 1}],
+        task="classification",
+        vocab_size=20,
+    )
     metrics = module.validation_step(batch, 0)
     assert "val_loss" in metrics
     assert "val_accuracy" in metrics

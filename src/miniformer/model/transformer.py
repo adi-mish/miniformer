@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Optional
 
 import torch
 import torch.nn as nn
@@ -12,7 +12,6 @@ from miniformer.model.encoder import Encoder
 from miniformer.model.initialization import init_transformer_module
 from miniformer.model.masks import causal_mask, padding_mask, self_attention_mask
 from miniformer.model.outputs import TransformerModelOutput
-from miniformer.utils.tokenization import stable_token_id
 
 if TYPE_CHECKING:
     from miniformer.inspect import TransformerTrace
@@ -66,43 +65,18 @@ class Transformer(nn.Module):
 
     def forward(
         self,
-        x: Union[torch.Tensor, List[Dict[str, Any]], Dict[str, torch.Tensor]],
+        x: torch.Tensor,
         mask: Optional[torch.Tensor] = None,
         *,  # make the cache args keyword-only
         past_key_values: Optional[EncoderPastKeyValues] = None,
         use_cache: bool = False,
-        **kwargs,
     ) -> TransformerModelOutput:
         """Run the encoder-only transformer with optional causal KV caching."""
-        # Handle non-tensor inputs (batches that are lists/dicts)
         if not isinstance(x, torch.Tensor):
-            # For raw batch inputs during inference
-            if isinstance(x, (list, tuple)) and isinstance(x[0], dict):
-                # Simple feature extraction - just get the first element if it's a batch
-                if "input_ids" in x[0]:
-                    x = torch.stack([item["input_ids"] for item in x])
-                elif "input" in x[0]:
-                    # Deterministic lightweight token IDs for inference without a tokenizer.
-                    vocab_size = self.config.vocab_size
-                    texts = [item["input"] for item in x]
-                    max_len = max(len(str(t).split()) for t in texts)
-                    x = torch.zeros(
-                        len(texts), max_len, dtype=torch.long, device=next(self.parameters()).device
-                    )
-                    for i, t in enumerate(texts):
-                        words = str(t).split()
-                        for j, w in enumerate(words):
-                            x[i, j] = stable_token_id(w, vocab_size)
-                else:
-                    raise TypeError("Input batch dict must contain 'input_ids' or 'input' keys")
-            elif isinstance(x, dict) and "input_ids" in x:
-                # Handle dictionary with input_ids directly
-                x = x["input_ids"]
-            else:
-                raise TypeError(
-                    "Input must be a tensor, a list of dicts with "
-                    "'input_ids' or 'input', or a dict with 'input_ids'"
-                )
+            raise TypeError(
+                "Transformer.forward expects a torch.Tensor. "
+                "Use miniformer.data.preprocessing for text or record batches."
+            )
 
         past_len = 0
         if use_cache:
@@ -165,7 +139,7 @@ class Transformer(nn.Module):
 
     def trace(
         self,
-        x: Union[torch.Tensor, List[Dict[str, Any]], Dict[str, torch.Tensor]],
+        x: torch.Tensor,
         mask: Optional[torch.Tensor] = None,
         *,
         top_k: int = 5,

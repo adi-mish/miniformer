@@ -1,5 +1,6 @@
 import torch
 
+from miniformer.data.preprocessing import collate_records
 from miniformer.train.module import MiniFormerModule
 from miniformer.train.train_config import TrainConfig
 
@@ -45,9 +46,12 @@ def test_gradient_clipping_config_options():
     for clip_val in [0.1, 0.5, 1.0]:
         cfg = make_cfg()
         model = MiniFormerModule(cfg)
-        loss = model.training_step(
-            [{"input": "test", "labels": 0}, {"input": "more", "labels": 1}], 0
+        batch = collate_records(
+            [{"input": "test", "labels": 0}, {"input": "more", "labels": 1}],
+            task="classification",
+            vocab_size=cfg.model_config["vocab_size"],
         )
+        loss = model.training_step(batch, 0)
         loss.backward()
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), clip_val)
@@ -69,4 +73,9 @@ def test_precision_config_values_do_not_prevent_model_initialization():
         cfg = make_cfg()
         cfg.precision = precision  # type: ignore[assignment]
         model = MiniFormerModule(cfg)
-        assert model.training_step([{"input": "test", "labels": 0}], 0).isfinite()
+        batch = collate_records(
+            [{"input": "test", "labels": 0}],
+            task="classification",
+            vocab_size=cfg.model_config["vocab_size"],
+        )
+        assert model.training_step(batch, 0).isfinite()

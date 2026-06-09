@@ -106,14 +106,16 @@ def test_datamodule_classification(tmp_path):
         num_workers=0,
         task="classification",
         shuffle_train=False,
+        model_config={"vocab_size": 20},
     )
     dm = MiniFormerDataModule(cfg, tokenizer=None)
     dm.setup()
     dl = dm.train_dataloader()
     batch = next(iter(dl))
-    # non-LM batches returned as list of dicts
-    assert isinstance(batch, list)
-    assert batch[0]["input"] == "x"
+    assert set(batch) == {"input_ids", "labels"}
+    assert batch["input_ids"].shape == (2, 1)
+    assert batch["input_ids"].dtype == torch.long
+    assert batch["labels"].tolist() == [0, 1]
 
 
 def test_datamodule_numeric_features_collate_dtype(tmp_path):
@@ -130,6 +132,7 @@ def test_datamodule_numeric_features_collate_dtype(tmp_path):
         num_workers=0,
         task="classification",
         shuffle_train=False,
+        model_config={"vocab_size": 20},
     )
     dm = MiniFormerDataModule(cfg, tokenizer=None)
     dm.setup()

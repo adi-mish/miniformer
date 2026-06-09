@@ -81,6 +81,14 @@ def test_feature_based_forward_shape():
     assert out.output.shape == (4, 20, 4)
 
 
+def test_transformer_rejects_raw_records():
+    cfg = TransformerConfig(vocab_size=50, d_model=16, n_heads=2, n_layers=1)
+    model = Transformer(cfg)
+
+    with pytest.raises(TypeError, match="torch.Tensor"):
+        model([{"input": "raw text"}])  # type: ignore[arg-type]
+
+
 def test_output_mode_validation_is_explicit():
     with pytest.raises(ValueError, match="hidden.*output_dim=None"):
         TransformerConfig(vocab_size=50, d_model=16, n_heads=2, output_dim=16)

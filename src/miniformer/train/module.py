@@ -13,7 +13,6 @@ from miniformer.config.model_config import TransformerConfig
 from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
 from miniformer.model.transformer import Transformer
 from miniformer.train.train_config import TrainConfig
-from miniformer.utils.tokenization import stable_token_id
 
 
 class MiniFormerModule(nn.Module):
@@ -22,8 +21,6 @@ class MiniFormerModule(nn.Module):
     def __init__(self, cfg: TrainConfig):
         super().__init__()
         self.cfg = cfg
-        self.tokenizer = None
-        self.pad_id = 0
         self.model: nn.Module
 
         if cfg.task == "language_modeling" and cfg.model != "seq2seq":
@@ -51,84 +48,28 @@ class MiniFormerModule(nn.Module):
     def device(self) -> torch.device:
         return next(self.parameters()).device
 
-    def _preprocess_batch(self, batch: Any) -> Tuple[Any, Optional[torch.Tensor]]:
-        """Convert supported dataset batches into model inputs and labels."""
-        labels: Optional[torch.Tensor]
-        if (
-            isinstance(batch, list)
-            and batch
-            and isinstance(batch[0], dict)
-            and "input" in batch[0]
-            and isinstance(batch[0]["input"], str)
-        ):
-            vocab_size = self.cfg.model_config["vocab_size"]
-            tokenized = [
-                torch.tensor([ord(char) % vocab_size for char in sample["input"]], dtype=torch.long)
-                for sample in batch
-            ]
-            if any(ids.numel() == 0 for ids in tokenized):
-                raise ValueError("String inputs must not be empty")
-            max_len = max(ids.size(0) for ids in tokenized)
-            input_ids = torch.zeros(len(batch), max_len, dtype=torch.long, device=self.device)
-            for i, ids in enumerate(tokenized):
-                input_ids[i, : ids.size(0)] = ids.to(self.device)
-
-            label_dtype = torch.long if self.cfg.task == "classification" else torch.float
-            labels = torch.tensor(
-                [sample["labels"] for sample in batch], dtype=label_dtype, device=self.device
+    def _preprocess_batch(self, batch: Any) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Move already-collated tensor batches to this module's device."""
+        if not isinstance(batch, dict):
+            raise TypeError(
+                "MiniFormerModule expects a tensor batch dictionary. "
+                "Use MiniFormerDataModule or miniformer.data.preprocessing to collate data."
             )
-            return input_ids, labels
 
-        if (
-            isinstance(batch, dict)
-            and "input" in batch
-            and isinstance(batch["input"], torch.Tensor)
-        ):
-            return batch["input"].to(self.device), batch["labels"].to(self.device)
-
-        if isinstance(batch, dict) and "input_ids" in batch:
-            return batch["input_ids"].to(self.device), batch["labels"].to(self.device)
-
-        if (
-            isinstance(batch, list)
-            and batch
-            and isinstance(batch[0], dict)
-            and "input" not in batch[0]
-        ):
-            labels = None
-            if "labels" in batch[0]:
-                dtype = torch.long if self.cfg.task == "classification" else torch.float
-                labels = torch.tensor(
-                    [item["labels"] for item in batch], dtype=dtype, device=self.device
-                )
-            return batch, labels
-
-        if isinstance(batch, list) and batch and isinstance(batch[0], dict) and "input" in batch[0]:
-            texts = [item["input"] for item in batch]
-            labels = (
-                torch.stack([item["labels"] for item in batch]).to(self.device)
-                if "labels" in batch[0]
-                else None
+        if isinstance(batch.get("input_ids"), torch.Tensor):
+            inputs = batch["input_ids"].to(self.device)
+        elif isinstance(batch.get("input"), torch.Tensor):
+            inputs = batch["input"].to(self.device)
+        else:
+            raise TypeError(
+                "MiniFormerModule expects batch['input_ids'] or batch['input'] to be a tensor. "
+                "Raw text and records belong in miniformer.data.preprocessing."
             )
-        else:
-            return batch, None
 
-        if self.tokenizer is not None:
-            enc = self.tokenizer(texts, return_tensors="pt", padding=True, truncation=True)
-            input_ids = enc["input_ids"].to(self.device)
-        else:
-            vocab_size = self.cfg.model_config.get("vocab_size", 30522)
-            max_len = max(len(str(text).split()) for text in texts)
-            input_ids = torch.zeros(len(texts), max_len, dtype=torch.long, device=self.device)
-            for i, text in enumerate(texts):
-                ids = torch.tensor(
-                    [stable_token_id(word, vocab_size) for word in str(text).split()],
-                    dtype=torch.long,
-                    device=self.device,
-                )
-                input_ids[i, : ids.size(0)] = ids
-
-        return input_ids, labels
+        labels = batch.get("labels")
+        if labels is not None and not isinstance(labels, torch.Tensor):
+            raise TypeError("MiniFormerModule expects batch['labels'] to be a tensor when present")
+        return inputs, labels.to(self.device) if labels is not None else None
 
     def forward_batch(self, batch) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         x, y = self._preprocess_batch(batch)
@@ -187,22 +128,29 @@ class MiniFormerModule(nn.Module):
 
         if self.cfg.task == "classification":
             logits = outputs[:, 0, :] if outputs.dim() == 3 else outputs
-            if isinstance(batch_or_labels, tuple) and len(batch_or_labels) == 1:
-                labels = batch_or_labels[0].to(logits.device)
-            else:
-                labels = torch.tensor([b["labels"] for b in batch_or_labels], device=logits.device)
+            labels = self._extract_supervised_labels(batch_or_labels, logits.device)
             loss = F.cross_entropy(logits, labels)
             return loss, logits
 
         preds = outputs.squeeze(-1)
         if preds.dim() == 2:
             preds = preds[:, 0]
-        if isinstance(batch_or_labels, tuple) and len(batch_or_labels) == 1:
-            labels = batch_or_labels[0].to(preds.device)
-        else:
-            labels = torch.tensor([b["labels"] for b in batch_or_labels], device=preds.device)
+        labels = self._extract_supervised_labels(batch_or_labels, preds.device)
         loss = F.mse_loss(preds, labels)
         return loss, preds
+
+    @staticmethod
+    def _extract_supervised_labels(batch_or_labels: Any, device: torch.device) -> torch.Tensor:
+        if isinstance(batch_or_labels, tuple) and len(batch_or_labels) == 1:
+            labels = batch_or_labels[0]
+        elif isinstance(batch_or_labels, dict):
+            labels = batch_or_labels.get("labels")
+        else:
+            labels = None
+
+        if not isinstance(labels, torch.Tensor):
+            raise TypeError("Supervised losses require tensor labels")
+        return labels.to(device)
 
     def training_step(self, batch, batch_idx: int = 0) -> torch.Tensor:
         outputs, labels = self.forward_batch(batch)

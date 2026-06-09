@@ -86,6 +86,7 @@ The structure is pretty straightforward:
 miniformer/
 ├── src/miniformer/
 │   ├── config/              # Configuration classes
+│   ├── data/                # Text/record preprocessing and collation helpers
 │   ├── model/               # Core transformer components
 │   │   ├── attention.py     # Multi-head attention with RoPE
 │   │   ├── embedding.py     # Token & positional embeddings
@@ -232,6 +233,10 @@ generated = model.generate(
 `output.output` returns whichever tensor is active when generic code can accept any
 of the three modes.
 
+The model classes accept tensors only. Convert raw text, JSONL records, or feature
+records with `miniformer.data.preprocessing` or `MiniFormerDataModule` before
+calling `Transformer.forward`, `Seq2SeqTransformer.forward`, or `MiniFormerModule`.
+
 `generate()` is greedy by default. Set `do_sample=True` to use `temperature`,
 `top_k`, or `top_p` sampling.
 
@@ -306,7 +311,26 @@ The library expects JSONL files (one JSON object per line). The format depends o
 {"input": "Temperature reading: 72F", "value": 72.0}
 ```
 
-One thing to note: for language modeling, you'll need a tokenizer. The trainer tries to load GPT-2's tokenizer from HuggingFace by default, but you can provide your own.
+Raw records are converted to tensors before they reach the models:
+
+```python
+from miniformer.data.preprocessing import collate_records
+
+batch = collate_records(
+    [{"input": "great movie", "labels": 1}, {"input": "bad movie", "labels": 0}],
+    task="classification",
+    vocab_size=30000,
+)
+
+input_ids = batch["input_ids"]  # LongTensor [batch, seq_len]
+labels = batch["labels"]       # LongTensor [batch]
+```
+
+For language modeling, you'll need a tokenizer. The trainer tries to load GPT-2's
+tokenizer from HuggingFace by default, but you can provide your own object with an
+`encode(text, add_special_tokens=True)` method. For supervised string inputs,
+`collate_records` can use that tokenizer or a deterministic hash-based fallback.
+Numeric feature records are padded into `batch["input"]` float tensors.
 
 ---
 

@@ -15,6 +15,11 @@ __all__ = [
     "TransformerTrace",
     "capture_transformer_trace",
     "save_trace_html",
+    "TextTokenizer",
+    "collate_records",
+    "encode_text",
+    "encode_text_batch",
+    "pad_token_sequences",
     "get_logger",
     "setup_logging",
 ]
@@ -22,6 +27,13 @@ __version__ = "0.1.0"
 
 if TYPE_CHECKING:
     from miniformer.config.model_config import TransformerConfig
+    from miniformer.data.preprocessing import (
+        TextTokenizer,
+        collate_records,
+        encode_text,
+        encode_text_batch,
+        pad_token_sequences,
+    )
     from miniformer.inspect import TransformerTrace, capture_transformer_trace, save_trace_html
     from miniformer.model.outputs import Seq2SeqModelOutput, TransformerModelOutput
     from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
@@ -61,6 +73,27 @@ def __getattr__(name: str):
         globals()["TransformerTrace"] = TransformerTrace
         globals()["capture_transformer_trace"] = capture_transformer_trace
         globals()["save_trace_html"] = save_trace_html
+        return globals()[name]
+    if name in {
+        "TextTokenizer",
+        "collate_records",
+        "encode_text",
+        "encode_text_batch",
+        "pad_token_sequences",
+    }:
+        from miniformer.data.preprocessing import (
+            TextTokenizer,
+            collate_records,
+            encode_text,
+            encode_text_batch,
+            pad_token_sequences,
+        )
+
+        globals()["TextTokenizer"] = TextTokenizer
+        globals()["collate_records"] = collate_records
+        globals()["encode_text"] = encode_text
+        globals()["encode_text_batch"] = encode_text_batch
+        globals()["pad_token_sequences"] = pad_token_sequences
         return globals()[name]
     if name in {"get_logger", "setup_logging"}:
         from miniformer.utils.logging import get_logger, setup_logging

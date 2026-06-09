@@ -7,12 +7,21 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from miniformer.data.preprocessing import TextTokenizer, collate_records, encode_text
+
 
 class JSONLinesDataset(Dataset):
     """A minimal Dataset reading line-separated JSON records."""
 
-    def __init__(self, path: str, tokenizer=None, task: str = "language_modeling"):
+    def __init__(
+        self,
+        path: str,
+        tokenizer: TextTokenizer | None = None,
+        task: str = "language_modeling",
+    ):
         super().__init__()
+        if task not in {"language_modeling", "classification", "regression"}:
+            raise ValueError(f"Unsupported dataset task: {task}")
         self.data = []
         for line_number, line in enumerate(Path(path).read_text().splitlines(), start=1):
             line = line.strip()
@@ -43,9 +52,7 @@ class JSONLinesDataset(Dataset):
             txt = item["text"]
             if self.tokenizer is None:
                 raise ValueError("Tokenizer required for LM task")
-            ids = torch.tensor(
-                self.tokenizer.encode(txt, add_special_tokens=True), dtype=torch.long
-            )
+            ids = encode_text(txt, tokenizer=self.tokenizer)
             if ids.numel() < 2:
                 raise ValueError("Language modeling records must produce at least two tokens")
             return {"input_ids": ids[:-1], "labels": ids[1:]}
@@ -61,7 +68,7 @@ class JSONLinesDataset(Dataset):
 class MiniFormerDataModule:
     """Small data loader factory for JSONL datasets."""
 
-    def __init__(self, cfg, tokenizer=None):
+    def __init__(self, cfg, tokenizer: TextTokenizer | None = None):
         self.cfg = cfg
         self.tokenizer = tokenizer
 
@@ -104,47 +111,10 @@ class MiniFormerDataModule:
         )
 
     def _collate_fn(self, batch):
-        """
-        Language-modeling batches are padded tensors. String classification and
-        regression batches stay as raw records so tokenization can happen in the
-        training module. Numeric feature sequences are padded into tensors.
-        """
-        task = self.cfg.task
-
-        # ------------------------------------------------------------------ 1. LM
-        if task == "language_modeling":
-            lengths = [b["input_ids"].size(0) for b in batch]
-            max_len = max(lengths)
-            input_ids = torch.full((len(batch), max_len), 0, dtype=torch.long)
-            labels = torch.full_like(input_ids, -100)
-            for i, b in enumerate(batch):
-                seq_len = lengths[i]
-                input_ids[i, :seq_len] = b["input_ids"]
-                labels[i, :seq_len] = b["labels"]
-            return {"input_ids": input_ids, "labels": labels}
-
-        # ---------------------------------------------------- 2. string inputs → return list
-        if task in {"classification", "regression"} and isinstance(batch[0]["input"], str):
-            return batch
-
-        # ------------------------------------------------ 3. numeric sequence features
-        if task in {"classification", "regression"}:
-            seq_lens = [len(s["input"]) for s in batch]
-            if min(seq_lens) == 0:
-                raise ValueError("Numeric feature sequences must not be empty")
-            max_len = max(seq_lens)
-            feat_keys = list(batch[0]["input"][0].keys())
-            feat_dim = len(feat_keys)
-
-            x = torch.zeros(len(batch), max_len, feat_dim, dtype=torch.float32)
-            label_dtype = torch.long if task == "classification" else torch.float32
-            y = torch.as_tensor([b["labels"] for b in batch], dtype=label_dtype)
-            for i, sample in enumerate(batch):
-                seq = torch.tensor(
-                    [[step[k] for k in feat_keys] for step in sample["input"]],
-                    dtype=torch.float32,
-                )
-                x[i, : seq.size(0)] = seq
-            return {"input": x, "labels": y}
-
-        raise ValueError(f"Unsupported task for collation: {task}")
+        vocab_size = int(getattr(self.cfg, "model_config", {}).get("vocab_size", 30522))
+        return collate_records(
+            batch,
+            task=self.cfg.task,
+            vocab_size=vocab_size,
+            tokenizer=self.tokenizer,
+        )
