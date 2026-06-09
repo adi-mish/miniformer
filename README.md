@@ -106,8 +106,7 @@ miniformer/
 │   ├── utils/               # Utility functions
 │   └── visualization/       # Attention plotting tools
 ├── tests/                   # Comprehensive test suite
-├── examples/                # Usage examples
-└── configs/                 # Example configurations
+└── examples/                # Usage examples
 ```
 
 ---
