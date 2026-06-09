@@ -1,7 +1,9 @@
+import pytest
 import torch
 
 from miniformer.model.cache import KeyValueCache
 from miniformer.model.outputs import TransformerModelOutput
+from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
 from miniformer.model.transformer import Transformer, TransformerConfig
 
 
@@ -114,3 +116,97 @@ def test_generation_with_eos_token():
     assert generated.size(1) <= input_ids.size(1) + 10
     # Should contain EOS token
     assert eos_token_id in generated[0]
+
+
+def test_seq2seq_generate_greedy_is_deterministic():
+    config = TransformerConfig(
+        vocab_size=40,
+        d_model=16,
+        n_heads=4,
+        n_layers=1,
+        d_ff=32,
+        dropout=0.0,
+        output_mode="vocab",
+    )
+    model = Seq2SeqTransformer(config).eval()
+    src = torch.randint(3, config.vocab_size, (2, 5))
+
+    with torch.no_grad():
+        first = model.generate(src, max_new_tokens=4, eos_token_id=0)
+        second = model.generate(src, max_new_tokens=4, eos_token_id=0)
+
+    assert torch.equal(first, second)
+
+
+def test_seq2seq_generate_cached_and_uncached_greedy_match():
+    config = TransformerConfig(
+        vocab_size=40,
+        d_model=16,
+        n_heads=4,
+        n_layers=2,
+        d_ff=32,
+        dropout=0.0,
+        output_mode="vocab",
+    )
+    model = Seq2SeqTransformer(config).eval()
+    src = torch.randint(3, config.vocab_size, (2, 5))
+
+    with torch.no_grad():
+        cached = model.generate(src, max_new_tokens=5, eos_token_id=0, use_cache=True)
+        uncached = model.generate(src, max_new_tokens=5, eos_token_id=0, use_cache=False)
+
+    assert torch.equal(cached, uncached)
+
+
+def test_seq2seq_generate_stops_on_eos():
+    config = TransformerConfig(
+        vocab_size=20,
+        d_model=16,
+        n_heads=4,
+        n_layers=1,
+        d_ff=32,
+        dropout=0.0,
+        output_mode="vocab",
+    )
+    model = Seq2SeqTransformer(config).eval()
+    eos_token_id = 3
+    assert isinstance(model.decoder.output_projection, torch.nn.Linear)
+    with torch.no_grad():
+        model.decoder.output_projection.weight.zero_()
+        model.decoder.output_projection.bias.fill_(-10.0)
+        model.decoder.output_projection.bias[eos_token_id] = 10.0
+
+    src = torch.randint(4, config.vocab_size, (2, 5))
+    generated = model.generate(src, max_new_tokens=5, eos_token_id=eos_token_id)
+
+    assert generated.shape == (2, 1)
+    assert torch.equal(generated, torch.full_like(generated, eos_token_id))
+
+
+@pytest.mark.parametrize(
+    "kwargs,match",
+    [
+        ({"max_new_tokens": -1}, "max_new_tokens"),
+        ({"bos_token_id": -1}, "bos_token_id"),
+        ({"eos_token_id": 100}, "eos_token_id"),
+        ({"do_sample": False, "temperature": 0.7}, "do_sample=True"),
+        ({"do_sample": True, "temperature": 0.0}, "temperature"),
+        ({"do_sample": True, "top_k": -1}, "top_k"),
+        ({"do_sample": True, "top_p": 0.0}, "top_p"),
+    ],
+)
+def test_seq2seq_generate_validates_arguments(kwargs, match):
+    config = TransformerConfig(
+        vocab_size=40,
+        d_model=16,
+        n_heads=4,
+        n_layers=1,
+        d_ff=32,
+        dropout=0.0,
+        output_mode="vocab",
+    )
+    model = Seq2SeqTransformer(config).eval()
+    src = torch.randint(3, config.vocab_size, (1, 4))
+
+    with pytest.raises((TypeError, ValueError), match=match):
+        model.generate(src, **kwargs)

@@ -219,6 +219,7 @@ src_ids = torch.randint(0, 32000, (1, 64))
 generated = model.generate(
     src_ids,
     max_new_tokens=50,
+    do_sample=True,
     temperature=0.8,
     top_k=40
 )
@@ -230,6 +231,9 @@ generated = model.generate(
 `output_mode="vocab"`, and `output.projection` for `output_mode="projection"`.
 `output.output` returns whichever tensor is active when generic code can accept any
 of the three modes.
+
+`generate()` is greedy by default. Set `do_sample=True` to use `temperature`,
+`top_k`, or `top_p` sampling.
 
 ---
 
