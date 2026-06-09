@@ -35,6 +35,7 @@ def test_pre_norm_vs_post_norm():
         d_model=d_model,
         n_heads=4,
         n_layers=2,
+        pre_norm=True,
     )
     
     config_post = TransformerConfig(
@@ -42,6 +43,7 @@ def test_pre_norm_vs_post_norm():
         d_model=d_model,
         n_heads=4,
         n_layers=2,
+        pre_norm=False,
     )
     
     model_pre = Transformer(config_pre)
@@ -134,6 +136,7 @@ def test_rotary_embedding_implementation():
             d_model=64,  # Use 64 to ensure divisibility
             n_heads=8,
             n_layers=1,
+            rotary_pct=rotary_pct,
         )
         model = Transformer(config)
         model.eval()

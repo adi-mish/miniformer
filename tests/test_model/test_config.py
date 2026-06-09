@@ -48,6 +48,25 @@ def test_invalid_activation():
         )
 
 
+def test_invalid_rotary_pct():
+    """Test that rotary percentage must stay in the supported range."""
+    with pytest.raises(ValueError, match="rotary_pct"):
+        TransformerConfig(rotary_pct=1.5)
+
+
+def test_optional_attention_config_serializes(tmp_path):
+    """Test optional attention fields are first-class config fields."""
+    config = TransformerConfig(pre_norm=False, use_sdpa=True, rotary_pct=0.5)
+
+    path = tmp_path / "config.json"
+    config.save_json(path)
+    loaded = TransformerConfig.from_json(path)
+
+    assert loaded.pre_norm is False
+    assert loaded.use_sdpa is True
+    assert loaded.rotary_pct == pytest.approx(0.5)
+
+
 def test_input_dim_projection():
     """Test that input_dim != d_model creates proper projection layer."""
     config = TransformerConfig(

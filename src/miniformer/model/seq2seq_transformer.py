@@ -193,6 +193,8 @@ class Seq2SeqTransformer(nn.Module):
     ) -> torch.Tensor:
         if self.decoder.token_embedding is None:
             raise RuntimeError("generate() is only available in token‑based mode.")
+        if temperature <= 0:
+            raise ValueError("temperature must be positive")
 
         device = src.device
         src_mask = create_padding_mask(src)
@@ -230,8 +232,15 @@ class Seq2SeqTransformer(nn.Module):
                     use_causal_mask=False,
                 )
 
-            # Get logits for the next token
-            logits = dec_out[:, -1, :] / temperature
+            # Get logits for the next token. If normal forward() is configured
+            # to return hidden states, reuse the token embedding as a vocab head
+            # for generation instead of sampling over d_model.
+            step_out = dec_out[:, -1, :]
+            if step_out.size(-1) == self.config.d_model:
+                logits = torch.matmul(step_out, self.decoder.token_embedding.weight.t())
+            else:
+                logits = step_out
+            logits = logits / temperature
 
             # Apply top-k and top-p filtering
             if top_k > 0:
@@ -247,7 +256,11 @@ class Seq2SeqTransformer(nn.Module):
                 sorted_logits, sorted_idx = torch.sort(logits, descending=True)
                 cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
                 sorted_mask = cumulative_probs > top_p
-                sorted_logits[sorted_mask] = -1e4
+                sorted_mask[..., 1:] = sorted_mask[..., :-1].clone()
+                sorted_mask[..., 0] = False
+                remove_mask = torch.zeros_like(logits, dtype=torch.bool)
+                remove_mask.scatter_(dim=-1, index=sorted_idx, src=sorted_mask)
+                logits = logits.masked_fill(remove_mask, -1e4)
 
             # Sample from the filtered distribution
             probs = logits.softmax(dim=-1)
@@ -255,5 +268,7 @@ class Seq2SeqTransformer(nn.Module):
 
             # Append the predicted token to the sequence
             generated = torch.cat((generated, next_token), dim=1)
+            if (next_token == eos_token_id).all():
+                break
 
         return generated[:, 1:]  # Exclude the initial BOS token

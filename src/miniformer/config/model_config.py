@@ -1,7 +1,6 @@
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union
+from dataclasses import dataclass
+from typing import Dict, Optional, Union
 import json
-import os
 from pathlib import Path
 
 
@@ -19,6 +18,9 @@ class TransformerConfig:
     activation: str = "gelu"  # "gelu", "relu", or "swiglu"
     layer_norm_eps: float = 1e-5
     max_seq_len: int = 1024
+    pre_norm: bool = True
+    use_sdpa: bool = False
+    rotary_pct: float = 0.0  # 0 = disabled, 1 = full head dimension
     
     # Input/Output dimensions
     input_dim: Optional[int] = None  # If provided, model accepts feature vectors directly
@@ -37,13 +39,23 @@ class TransformerConfig:
     
     def __post_init__(self):
         """Validate configuration and set defaults"""
-        # ✱ Validate d_model/n_heads ✱
+        if self.d_model <= 0:
+            raise ValueError("d_model must be positive")
+        if self.n_heads <= 0:
+            raise ValueError("n_heads must be positive")
+        if self.n_layers <= 0:
+            raise ValueError("n_layers must be positive")
+        if self.dropout < 0 or self.dropout >= 1:
+            raise ValueError("dropout must be in the range [0, 1)")
+        if self.rotary_pct < 0 or self.rotary_pct > 1:
+            raise ValueError("rotary_pct must be in the range [0, 1]")
+
         if self.d_model % self.n_heads != 0:
             raise ValueError(f"d_model ({self.d_model}) must be divisible by n_heads ({self.n_heads})")
 
-        # ✱ Validate activation ✱
+        self.activation = self.activation.lower()
         valid_activations = {"gelu", "relu", "swiglu"}
-        if self.activation.lower() not in valid_activations:
+        if self.activation not in valid_activations:
             raise ValueError(f"Unknown activation: {self.activation}")
 
         if self.input_dim is not None and self.input_dim != self.d_model and self.output_dim is None:

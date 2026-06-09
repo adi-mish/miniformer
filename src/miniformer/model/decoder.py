@@ -17,12 +17,15 @@ class DecoderLayer(nn.Module):
         self.self_attention = MultiHeadAttention(
             d_model=config.d_model,
             n_heads=config.n_heads,
-            dropout=config.dropout
+            dropout=config.dropout,
+            use_sdpa=getattr(config, "use_sdpa", False),
+            rotary_pct=getattr(config, "rotary_pct", 0.0),
         )
         self.cross_attention = MultiHeadAttention(
             d_model=config.d_model,
             n_heads=config.n_heads,
-            dropout=config.dropout
+            dropout=config.dropout,
+            use_sdpa=getattr(config, "use_sdpa", False),
         )
         self.feed_forward = FeedForward(
             d_model=config.d_model,
@@ -154,8 +157,7 @@ class Decoder(nn.Module):
     
     def create_causal_mask(self, seq_len: int, device: torch.device) -> torch.Tensor:
         """Create causal (lower triangular) attention mask for autoregressive generation"""
-        mask = torch.triu(torch.ones(seq_len, seq_len, device=device), diagonal=1)
-        return mask.bool()
+        return torch.tril(torch.ones(seq_len, seq_len, device=device, dtype=torch.bool))
     
     def forward(
         self,
@@ -214,6 +216,9 @@ class Decoder(nn.Module):
             cross_attentions.append(cross_attn)
             if use_cache:
                 new_past_kv.append((new_self, new_cross))
+
+        self.self_attentions = self_attentions
+        self.cross_attentions = cross_attentions
 
         # ── final projection (optional) ──────────────────────────────────
         output = x if return_hidden else self.output_projection(x)
