@@ -69,6 +69,8 @@ class Encoder(nn.Module):
         self.config = config
 
         # ― input ​projection / embeddings ―
+        self.token_embedding: Optional[nn.Embedding]
+        self.input_projection: Optional[nn.Linear]
         if config.input_dim is None:  # NLP path
             self.token_embedding = nn.Embedding(config.vocab_size, config.d_model)
             self.input_projection = None

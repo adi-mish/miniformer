@@ -39,6 +39,7 @@ class Transformer(nn.Module):
         self.encoder = Encoder(config)
         self.token_embedding = self.encoder.token_embedding  # expose for tests
         self.input_projection = self.encoder.input_projection  # expose for tests
+        self.output_projection: nn.Module
 
         # ── decide projection dimensionality ─────────────────────────────
         if config.output_dim is not None:  # explicit override

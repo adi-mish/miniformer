@@ -128,6 +128,7 @@ class Seq2SeqTransformer(nn.Module):
             self.decoder.token_embedding.weight = self.encoder.token_embedding.weight
 
         # encoder input projection if needed
+        self._enc_input_proj: Optional[nn.Linear]
         if config.input_dim is not None and config.input_dim != config.d_model:
             self._enc_input_proj = nn.Linear(config.input_dim, config.d_model)
         else:

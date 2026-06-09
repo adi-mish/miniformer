@@ -118,6 +118,8 @@ class Decoder(nn.Module):
         self.config = config
 
         # Input projection for feature vectors or token embeddings
+        self.input_projection: Optional[nn.Linear]
+        self.token_embedding: Optional[nn.Embedding]
         if config.input_dim is not None:
             # For direct feature input (time series, sensor data, etc.)
             self.input_projection = nn.Linear(config.input_dim, config.d_model)

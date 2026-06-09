@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import asdict
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -24,6 +24,7 @@ class MiniFormerModule(nn.Module):
         self.cfg = cfg
         self.tokenizer = None
         self.pad_id = 0
+        self.model: nn.Module
 
         if cfg.task == "language_modeling" and cfg.model != "seq2seq":
             raise ValueError("language_modeling currently requires model='seq2seq'")
@@ -48,8 +49,9 @@ class MiniFormerModule(nn.Module):
     def device(self) -> torch.device:
         return next(self.parameters()).device
 
-    def _preprocess_batch(self, batch):
+    def _preprocess_batch(self, batch: Any) -> Tuple[Any, Optional[torch.Tensor]]:
         """Convert supported dataset batches into model inputs and labels."""
+        labels: Optional[torch.Tensor]
         if (
             isinstance(batch, list)
             and batch
@@ -144,7 +146,7 @@ class MiniFormerModule(nn.Module):
         if self.cfg.scheduler == "none":
             return optimizer, None
         if self.cfg.scheduler == "linear":
-            scheduler = torch.optim.lr_scheduler.LinearLR(
+            scheduler: torch.optim.lr_scheduler.LRScheduler = torch.optim.lr_scheduler.LinearLR(
                 optimizer,
                 start_factor=0.1,
                 total_iters=max(self.cfg.warmup_steps, 1),
@@ -207,6 +209,8 @@ class MiniFormerModule(nn.Module):
 
     def validation_step(self, batch, batch_idx: int = 0) -> Dict[str, float]:
         outputs, labels = self.forward_batch(batch)
+        if labels is None:
+            raise ValueError("Validation batches must include labels")
         loss, predictions = self._compute_loss((labels,), outputs)
         metrics = {"val_loss": float(loss.detach().cpu())}
 

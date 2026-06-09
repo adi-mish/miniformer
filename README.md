@@ -1,7 +1,7 @@
 # Miniformer: A Lightweight Transformer Library
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-%23EE4C2C.svg?&logo=PyTorch&logoColor=white)](https://pytorch.org/)
 
 Miniformer is a compact transformer implementation that I built to understand and experiment with the attention mechanism without the complexity of larger frameworks. Unlike heavyweight libraries that can be intimidating to modify, this codebase prioritizes readability and hackability—you can actually follow what's happening in each layer.
@@ -51,7 +51,7 @@ The code is modular—you can swap out attention mechanisms, activations, or pos
 
 ## Getting Started
 
-Clone and install dependencies. You'll need Python 3.9+ and PyTorch 2.0+:
+Clone and install dependencies. You'll need Python 3.10+ and PyTorch 2.0+:
 
 ```bash
 git clone https://github.com/adi-mish/miniformer.git
