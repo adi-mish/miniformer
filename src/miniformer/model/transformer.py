@@ -1,7 +1,8 @@
+import os
+from typing import Any, Dict, List, Optional, Union
+
 import torch
 import torch.nn as nn
-import os
-from typing import Optional, List, Dict, Any, Union
 
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.encoder import Encoder
@@ -14,10 +15,10 @@ class Transformer(nn.Module):
         """
         Build an **encoder-only** Transformer.
 
-        • If ``output_dim`` is given we always project to that size.  
+        • If ``output_dim`` is given we always project to that size.
         • Otherwise we use a simple heuristic:
             – **token path**  (vocab available) → project back to *vocab_size*
-              *only* when the vocabulary is at least 10 × ``d_model``.  
+              *only* when the vocabulary is at least 10 × ``d_model``.
             – **feature path** → keep the hidden size (*d_model*).
         • When we project to *vocab_size* we **tie** the weights with the
           input embedding (classic weight-tying).
@@ -36,21 +37,21 @@ class Transformer(nn.Module):
 
         # ── real encoder backbone ─────────────────────────────────────────
         self.encoder = Encoder(config)
-        self.token_embedding = self.encoder.token_embedding      # expose for tests
-        self.input_projection = self.encoder.input_projection    # expose for tests
+        self.token_embedding = self.encoder.token_embedding  # expose for tests
+        self.input_projection = self.encoder.input_projection  # expose for tests
 
         # ── decide projection dimensionality ─────────────────────────────
-        if config.output_dim is not None:                # explicit override
+        if config.output_dim is not None:  # explicit override
             target_dim = config.output_dim
         else:
             # tie back to vocab only if vocab is “much” larger than hidden
             if config.input_dim is None and config.vocab_size >= 10 * config.d_model:
                 target_dim = config.vocab_size
-            else:                                        # feature-style usage
+            else:  # feature-style usage
                 target_dim = config.d_model
 
         # ── build projection head + optional weight-tying ────────────────
-        if (target_dim == config.vocab_size and self.token_embedding is not None):
+        if target_dim == config.vocab_size and self.token_embedding is not None:
             # classic weight-tying
             self.output_projection = self.token_embedding
             self._tied_weights = True
@@ -81,7 +82,7 @@ class Transformer(nn.Module):
         self,
         x: Union[torch.Tensor, List[Dict[str, Any]], Dict[str, torch.Tensor]],
         mask: Optional[torch.Tensor] = None,
-        *,                                   # make the cache args keyword-only
+        *,  # make the cache args keyword-only
         past_key_values: Optional[torch.Tensor] = None,
         use_cache: bool = False,
         **kwargs,
@@ -93,7 +94,7 @@ class Transformer(nn.Module):
 
         Simple sequence-level cache (``use_cache=True``)
         ------------------------------------------------
-        We keep the *already-seen token ids* as ``past_key_values``.  
+        We keep the *already-seen token ids* as ``past_key_values``.
         On each call we prepend them to the newly provided tokens, run the
         encoder once, and then return **only** the projection for the fresh
         tokens together with the updated cache.
@@ -114,7 +115,9 @@ class Transformer(nn.Module):
                     vocab_size = self.config.vocab_size
                     texts = [item["input"] for item in x]
                     max_len = max(len(str(t).split()) for t in texts)
-                    x = torch.zeros(len(texts), max_len, dtype=torch.long, device=next(self.parameters()).device)
+                    x = torch.zeros(
+                        len(texts), max_len, dtype=torch.long, device=next(self.parameters()).device
+                    )
                     for i, t in enumerate(texts):
                         words = str(t).split()
                         for j, w in enumerate(words):
@@ -125,17 +128,19 @@ class Transformer(nn.Module):
                 # Handle dictionary with input_ids directly
                 x = x["input_ids"]
             else:
-                raise TypeError("Input must be a tensor, a list of dicts with 'input_ids' or 'input', or a dict with 'input_ids'")
-            
+                raise TypeError(
+                    "Input must be a tensor, a list of dicts with 'input_ids' or 'input', or a dict with 'input_ids'"
+                )
+
         # ----- stitch the full sequence when caching ------------------------
         if use_cache:
             if self.token_embedding is None:
                 raise RuntimeError("Caching is only implemented for token-based mode.")
             if past_key_values is not None:
-                x_full = torch.cat([past_key_values, x], dim=1)   # [B, S_prev+S_new]
+                x_full = torch.cat([past_key_values, x], dim=1)  # [B, S_prev+S_new]
             else:
                 x_full = x
-            new_past = x_full.detach()            # store *token ids* as the cache
+            new_past = x_full.detach()  # store *token ids* as the cache
         else:
             x_full = x
             new_past = None
@@ -146,8 +151,10 @@ class Transformer(nn.Module):
 
         # ----- run encoder --------------------------------------------------
         if self.encoder is None:
-            raise RuntimeError("Encoder is not initialized properly. Check the Encoder class and configuration.")
-        h_full = self.encoder(x_full, mask)       # [B, S_total, d_model]
+            raise RuntimeError(
+                "Encoder is not initialized properly. Check the Encoder class and configuration."
+            )
+        h_full = self.encoder(x_full, mask)  # [B, S_total, d_model]
 
         # ----- projection (tied / linear / identity) ------------------------
         if getattr(self, "_tied_weights", False) and self.token_embedding is not None:
@@ -156,10 +163,10 @@ class Transformer(nn.Module):
             proj_full = self.output_projection(h_full)
 
         if not use_cache:
-            return proj_full                                 # legacy behaviour
+            return proj_full  # legacy behaviour
         else:
             # slice out the freshly generated tokens
-            out_new = proj_full[:, -x.size(1):, :].contiguous()
+            out_new = proj_full[:, -x.size(1) :, :].contiguous()
             return out_new, new_past
 
     def _create_mask(self, x):

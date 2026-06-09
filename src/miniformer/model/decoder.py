@@ -1,19 +1,20 @@
+from typing import List, Optional, Tuple
+
 import torch
 import torch.nn as nn
-from typing import Optional, Tuple, List
 
+from miniformer.config.model_config import TransformerConfig
 from miniformer.model.attention import MultiHeadAttention
 from miniformer.model.feedforward import FeedForward
-from miniformer.config.model_config import TransformerConfig
 
 
 class DecoderLayer(nn.Module):
     """Transformer decoder layer with self-attention and cross-attention"""
-    
+
     def __init__(self, config: TransformerConfig):
         super().__init__()
         self.pre_norm = getattr(config, "pre_norm", True)
-        
+
         self.self_attention = MultiHeadAttention(
             d_model=config.d_model,
             n_heads=config.n_heads,
@@ -31,15 +32,15 @@ class DecoderLayer(nn.Module):
             d_model=config.d_model,
             d_ff=config.d_ff,
             dropout=config.dropout,
-            activation=config.activation
+            activation=config.activation,
         )
-        
+
         self.norm1 = nn.LayerNorm(config.d_model, eps=config.layer_norm_eps)
         self.norm2 = nn.LayerNorm(config.d_model, eps=config.layer_norm_eps)
         self.norm3 = nn.LayerNorm(config.d_model, eps=config.layer_norm_eps)
-        
+
         self.dropout = nn.Dropout(config.dropout)
-        
+
     def forward(
         self,
         x: torch.Tensor,
@@ -49,8 +50,13 @@ class DecoderLayer(nn.Module):
         past_self: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         past_cross: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         use_cache: bool = False,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor,
-               Optional[Tuple[torch.Tensor, torch.Tensor]], Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+    ) -> Tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        Optional[Tuple[torch.Tensor, torch.Tensor]],
+        Optional[Tuple[torch.Tensor, torch.Tensor]],
+    ]:
 
         # choose norm order
         residual = x
@@ -100,15 +106,17 @@ class DecoderLayer(nn.Module):
 
         return x, self_attn, cross_attn, new_self, new_cross
 
+
 class Decoder(nn.Module):
     """Transformer decoder stack supporting various data types"""
+
     # allow output_projection to be any module (Linear, Identity, etc.)
     output_projection: nn.Module
-    
+
     def __init__(self, config: TransformerConfig):
         super().__init__()
         self.config = config
-        
+
         # Input projection for feature vectors or token embeddings
         if config.input_dim is not None:
             # For direct feature input (time series, sensor data, etc.)
@@ -118,17 +126,14 @@ class Decoder(nn.Module):
             # For token-based input (NLP tasks)
             self.token_embedding = nn.Embedding(config.vocab_size, config.d_model)
             self.input_projection = None
-            
+
         # Positional encoding - learnable for flexibility with different sequence types
         self.position_encoding = nn.Embedding(config.max_seq_len, config.d_model)
         self.dropout = nn.Dropout(config.dropout)
-        
+
         # Decoder layers
-        self.layers = nn.ModuleList([
-            DecoderLayer(config)
-            for _ in range(config.n_layers)
-        ])
-        
+        self.layers = nn.ModuleList([DecoderLayer(config) for _ in range(config.n_layers)])
+
         # Output projection based on task type
         if self.token_embedding is not None:
             # Language modeling task
@@ -138,13 +143,13 @@ class Decoder(nn.Module):
             if config.output_dim is None:
                 raise ValueError("output_dim must be specified for non-token-based tasks.")
             self.output_projection = nn.Linear(config.d_model, config.output_dim)
-        
+
         # Apply weight initialization
         self.apply(self._init_weights)
 
         self.self_attentions: Optional[List[torch.Tensor]] = None
         self.cross_attentions: Optional[List[torch.Tensor]] = None
-        
+
     def _init_weights(self, module):
         """Initialize weights following transformer conventions"""
         if isinstance(module, (nn.Linear, nn.Embedding)):
@@ -154,7 +159,7 @@ class Decoder(nn.Module):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
-    
+
     def create_causal_mask(
         self,
         seq_len: int,
@@ -162,12 +167,10 @@ class Decoder(nn.Module):
         past_len: int = 0,
     ) -> torch.Tensor:
         """Create a cache-aware causal mask [query_len, key_len]."""
-        query_positions = torch.arange(
-            past_len, past_len + seq_len, device=device
-        ).unsqueeze(1)
+        query_positions = torch.arange(past_len, past_len + seq_len, device=device).unsqueeze(1)
         key_positions = torch.arange(past_len + seq_len, device=device).unsqueeze(0)
         return key_positions <= query_positions
-    
+
     def forward(
         self,
         x: torch.Tensor,
@@ -177,8 +180,12 @@ class Decoder(nn.Module):
         use_causal_mask: bool = True,
         *,
         past_key_values: Optional[
-            List[Tuple[Optional[Tuple[torch.Tensor, torch.Tensor]],
-                       Optional[Tuple[torch.Tensor, torch.Tensor]]]]
+            List[
+                Tuple[
+                    Optional[Tuple[torch.Tensor, torch.Tensor]],
+                    Optional[Tuple[torch.Tensor, torch.Tensor]],
+                ]
+            ]
         ] = None,
         use_cache: bool = False,
         return_hidden: bool = False,
@@ -202,18 +209,22 @@ class Decoder(nn.Module):
 
         # ── token/feature input → d_model ───────────────────────────────
         if self.token_embedding is not None:
-            x = self.token_embedding(x) * (self.config.d_model ** 0.5)
+            x = self.token_embedding(x) * (self.config.d_model**0.5)
         elif self.input_projection is not None:
             if x.dim() != 3 or x.size(-1) != self.config.input_dim:
-                raise ValueError(f"Expected feature tensor of shape [B, S, {self.config.input_dim}]")
+                raise ValueError(
+                    f"Expected feature tensor of shape [B, S, {self.config.input_dim}]"
+                )
             x = self.input_projection(x)
         else:
             raise RuntimeError("Decoder has no input layer")
 
         # positional encodings ------------------------------------------------
-        positions = torch.arange(
-            past_len, past_len + seq_len, device=device
-        ).unsqueeze(0).expand(batch_size, seq_len)
+        positions = (
+            torch.arange(past_len, past_len + seq_len, device=device)
+            .unsqueeze(0)
+            .expand(batch_size, seq_len)
+        )
         x = self.dropout(x + self.position_encoding(positions))
 
         if use_causal_mask and self_attn_mask is None:
@@ -228,9 +239,13 @@ class Decoder(nn.Module):
         for i, layer in enumerate(self.layers):
             past_self, past_cross = past_key_values[i]
             x, self_attn, cross_attn, new_self, new_cross = layer(
-                x, encoder_output,
-                self_attn_mask, cross_attn_mask,
-                past_self, past_cross, use_cache,
+                x,
+                encoder_output,
+                self_attn_mask,
+                cross_attn_mask,
+                past_self,
+                past_cross,
+                use_cache,
             )
             self_attentions.append(self_attn)
             cross_attentions.append(cross_attn)
@@ -243,8 +258,11 @@ class Decoder(nn.Module):
         # ── final projection (optional) ──────────────────────────────────
         output = x if return_hidden else self.output_projection(x)
 
-        return (output, self_attentions, cross_attentions, new_past_kv) if use_cache \
-               else (output, self_attentions, cross_attentions)
+        return (
+            (output, self_attentions, cross_attentions, new_past_kv)
+            if use_cache
+            else (output, self_attentions, cross_attentions)
+        )
 
     def get_attention_weights(self) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
         """Get attention weights from the last forward pass"""

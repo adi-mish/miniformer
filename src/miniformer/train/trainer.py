@@ -157,11 +157,15 @@ def train_model(
             best_value = monitor_value
             best_metrics = metrics
             epochs_without_improvement = 0
-            module.save_checkpoint(ckpt_dir / "best.pt", optimizer=optimizer, epoch=epoch, metrics=metrics)
+            module.save_checkpoint(
+                ckpt_dir / "best.pt", optimizer=optimizer, epoch=epoch, metrics=metrics
+            )
         else:
             epochs_without_improvement += 1
 
-        module.save_checkpoint(ckpt_dir / "last.pt", optimizer=optimizer, epoch=epoch, metrics=metrics)
+        module.save_checkpoint(
+            ckpt_dir / "last.pt", optimizer=optimizer, epoch=epoch, metrics=metrics
+        )
 
         if (
             cfg.early_stopping_patience > 0

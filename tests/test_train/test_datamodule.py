@@ -1,7 +1,9 @@
 import json
-import torch
-import pytest
 from types import SimpleNamespace
+
+import pytest
+import torch
+
 from miniformer.train.datamodule import JSONLinesDataset, MiniFormerDataModule
 
 
@@ -57,10 +59,7 @@ def test_jsonlines_dataset_rejects_non_object_records(tmp_path):
 
 
 def test_jsonlines_dataset_classification_and_regression(tmp_path):
-    records = [
-        {"input": "foo", "label": 1},
-        {"input": "bar", "value": 2.5}
-    ]
+    records = [{"input": "foo", "label": 1}, {"input": "bar", "value": 2.5}]
     path = create_jsonlines_file(tmp_path, records)
     ds_clf = JSONLinesDataset(path, tokenizer=None, task="classification")
     item = ds_clf[0]
@@ -77,8 +76,13 @@ def test_datamodule_lm(tmp_path):
     records = [{"text": "aaa"}, {"text": "bb"}]
     path = create_jsonlines_file(tmp_path, records)
     cfg = SimpleNamespace(
-        train_path=path, val_path="", test_path="",
-        batch_size=2, num_workers=0, task="language_modeling", shuffle_train=False
+        train_path=path,
+        val_path="",
+        test_path="",
+        batch_size=2,
+        num_workers=0,
+        task="language_modeling",
+        shuffle_train=False,
     )
     dm = MiniFormerDataModule(cfg, tokenizer=DummyTokenizer())
     dm.setup()
@@ -88,15 +92,20 @@ def test_datamodule_lm(tmp_path):
     assert batch["input_ids"].shape[0] == 2
     assert batch["labels"].shape == batch["input_ids"].shape
     # second sample is length 1, so padded positions should be -100
-    assert (batch["labels"][1,1:] == -100).all()
+    assert (batch["labels"][1, 1:] == -100).all()
 
 
 def test_datamodule_classification(tmp_path):
     records = [{"input": "x", "label": 0}, {"input": "y", "label": 1}]
     path = create_jsonlines_file(tmp_path, records)
     cfg = SimpleNamespace(
-        train_path=path, val_path="", test_path="",
-        batch_size=2, num_workers=0, task="classification", shuffle_train=False
+        train_path=path,
+        val_path="",
+        test_path="",
+        batch_size=2,
+        num_workers=0,
+        task="classification",
+        shuffle_train=False,
     )
     dm = MiniFormerDataModule(cfg, tokenizer=None)
     dm.setup()

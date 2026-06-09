@@ -7,7 +7,9 @@ import torch
 from miniformer.train.module import MiniFormerModule
 
 
-def make_cfg(task: str, scheduler: str = "none", output_dim: Optional[int] = None) -> SimpleNamespace:
+def make_cfg(
+    task: str, scheduler: str = "none", output_dim: Optional[int] = None
+) -> SimpleNamespace:
     model_config = {
         "vocab_size": 20,
         "d_model": 8,

@@ -48,7 +48,9 @@ def test_regression_training(tmp_path):
     metrics = train_model(cfg, module=module)
 
     assert "val_mae" in metrics
-    assert any(not torch.allclose(initial[name], param) for name, param in module.named_parameters())
+    assert any(
+        not torch.allclose(initial[name], param) for name, param in module.named_parameters()
+    )
 
     datamodule = MiniFormerDataModule(cfg)
     datamodule.setup()

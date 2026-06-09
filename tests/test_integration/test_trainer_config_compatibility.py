@@ -44,16 +44,20 @@ def test_gradient_clipping_compatibility():
     for clip_val in [0.1, 0.5, 1.0]:
         cfg = make_cfg()
         model = MiniFormerModule(cfg)
-        loss = model.training_step([{"input": "test", "labels": 0}, {"input": "more", "labels": 1}], 0)
+        loss = model.training_step(
+            [{"input": "test", "labels": 0}, {"input": "more", "labels": 1}], 0
+        )
         loss.backward()
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), clip_val)
         total_norm_after = torch.linalg.vector_norm(
-            torch.stack([
-                param.grad.detach().norm()
-                for param in model.parameters()
-                if param.grad is not None
-            ])
+            torch.stack(
+                [
+                    param.grad.detach().norm()
+                    for param in model.parameters()
+                    if param.grad is not None
+                ]
+            )
         ).item()
 
         assert total_norm_after <= clip_val + 1e-5

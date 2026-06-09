@@ -1,6 +1,8 @@
 import json
 import sys
+
 import pytest
+
 from miniformer.train.train_config import TrainConfig
 
 
@@ -48,11 +50,15 @@ def test_from_cli_model_config_json(monkeypatch):
 
 def test_from_cli_config_json_overrides_args(monkeypatch, tmp_path):
     config_path = tmp_path / "train.json"
-    config_path.write_text(json.dumps({
-        "batch_size": 16,
-        "logger": "csv",
-        "model_config": {"vocab_size": 256},
-    }))
+    config_path.write_text(
+        json.dumps(
+            {
+                "batch_size": 16,
+                "logger": "csv",
+                "model_config": {"vocab_size": 256},
+            }
+        )
+    )
     monkeypatch.setattr(
         sys,
         "argv",

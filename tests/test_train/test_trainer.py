@@ -1,7 +1,13 @@
 import torch
 
 from miniformer.train.train_config import TrainConfig
-from miniformer.train.trainer import _mean_metrics, evaluate, seed_everything, train_model, train_one_epoch
+from miniformer.train.trainer import (
+    _mean_metrics,
+    evaluate,
+    seed_everything,
+    train_model,
+    train_one_epoch,
+)
 
 
 class TinyModule(torch.nn.Module):
@@ -56,10 +62,12 @@ def test_evaluate_averages_metrics():
 
 
 def test_mean_metrics_averages_only_present_keys():
-    metrics = _mean_metrics([
-        {"val_loss": 2.0, "val_accuracy": 1.0},
-        {"val_loss": 4.0},
-    ])
+    metrics = _mean_metrics(
+        [
+            {"val_loss": 2.0, "val_accuracy": 1.0},
+            {"val_loss": 4.0},
+        ]
+    )
 
     assert metrics == {"val_accuracy": 1.0, "val_loss": 3.0}
 

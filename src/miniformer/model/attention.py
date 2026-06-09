@@ -8,9 +8,10 @@ Backwards‑compatible with the original forward signature.
 """
 
 from __future__ import annotations
-from typing import Optional, Tuple
 
 import math
+from typing import Optional, Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -36,7 +37,7 @@ class MultiHeadAttention(nn.Module):
         n_heads: int,
         dropout: float = 0.1,
         use_sdpa: bool = False,  # SDPA requires PyTorch 2.0+
-        rotary_pct: float = 0.0,   # 0 = disabled, 1 = apply to full head‑dim
+        rotary_pct: float = 0.0,  # 0 = disabled, 1 = apply to full head‑dim
     ):
         super().__init__()
         assert d_model % n_heads == 0, "d_model must be divisible by n_heads"
@@ -59,10 +60,13 @@ class MultiHeadAttention(nn.Module):
         # pre‑compute sin / cos cache for RoPE – small for “mini” models
         if self.rotary_dim > 0:
             inv_freq = 1.0 / (
-                10000 ** (torch.arange(0, self.rotary_dim, 2, dtype=torch.float32) / self.rotary_dim)
+                10000
+                ** (torch.arange(0, self.rotary_dim, 2, dtype=torch.float32) / self.rotary_dim)
             )
             self.register_buffer("inv_freq", inv_freq, persistent=False)
-            self._rope_cache: dict[tuple[int, torch.device, torch.dtype], Tuple[torch.Tensor, torch.Tensor]] = {}
+            self._rope_cache: dict[
+                tuple[int, torch.device, torch.dtype], Tuple[torch.Tensor, torch.Tensor]
+            ] = {}
         else:
             self.inv_freq = None
             self._rope_cache = {}
@@ -76,7 +80,7 @@ class MultiHeadAttention(nn.Module):
         if cache_key not in self._rope_cache:
             t = torch.arange(total_len, device=x.device, dtype=torch.float32)
             freqs = torch.einsum("i , j -> i j", t, self.inv_freq)  # [L, D/2]
-            emb = torch.cat([freqs, freqs], dim=-1)                 # [L, D]
+            emb = torch.cat([freqs, freqs], dim=-1)  # [L, D]
             sin = emb.sin()[None, None, :, :].to(dtype=x.dtype)
             cos = emb.cos()[None, None, :, :].to(dtype=x.dtype)
             self._rope_cache[cache_key] = (sin, cos)
@@ -92,7 +96,7 @@ class MultiHeadAttention(nn.Module):
     # ---------------------------------------------------------------- forward
     def forward(
         self,
-        q: torch.Tensor,                      # [B, L, D]
+        q: torch.Tensor,  # [B, L, D]
         k: torch.Tensor,
         v: torch.Tensor,
         mask: Optional[torch.Tensor] = None,  # broadcastable to [B, heads, L, S]
@@ -122,9 +126,7 @@ class MultiHeadAttention(nn.Module):
         # SDPA or manual attention -----------------------------------------
         if self.use_sdpa:
             dropout_p = self.dropout.p if self.training else 0.0
-            out = F.scaled_dot_product_attention(
-                q, k, v, attn_mask=mask, dropout_p=dropout_p
-            )
+            out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=dropout_p)
             attn = None  # PyTorch does not return weights
             out = out.transpose(1, 2)  # [B, L, H, D]
         else:

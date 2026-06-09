@@ -91,11 +91,18 @@ def capture_transformer_trace(
     was_training = model.training
 
     def should_trace(name: str) -> bool:
-        return any(fragment in name for fragment in layer_name_fragments) and name.rsplit(".", 1)[-1].isdigit()
+        return (
+            any(fragment in name for fragment in layer_name_fragments)
+            and name.rsplit(".", 1)[-1].isdigit()
+        )
 
     for name, module in model.named_modules():
         if should_trace(name):
-            hooks.append(module.register_forward_hook(lambda _m, _i, output, name=name: _record(name, output)))
+            hooks.append(
+                module.register_forward_hook(
+                    lambda _m, _i, output, name=name: _record(name, output)
+                )
+            )
 
     def cleanup() -> None:
         for hook in hooks:

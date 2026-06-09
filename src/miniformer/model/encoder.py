@@ -1,5 +1,6 @@
 from __future__ import annotations
-from typing import Optional, List, Tuple
+
+from typing import List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -68,10 +69,10 @@ class Encoder(nn.Module):
         self.config = config
 
         # ― input ​projection / embeddings ―
-        if config.input_dim is None:                           # NLP path
+        if config.input_dim is None:  # NLP path
             self.token_embedding = nn.Embedding(config.vocab_size, config.d_model)
             self.input_projection = None
-        else:                                                  # generic feature path
+        else:  # generic feature path
             self.token_embedding = None
             self.input_projection = nn.Linear(config.input_dim, config.d_model)
 
@@ -100,20 +101,18 @@ class Encoder(nn.Module):
     # ---------------------------------------------------------------- forward
     def forward(
         self,
-        x: torch.Tensor,                       # [B, S] int or [B, S, feat]
-        mask: Optional[torch.Tensor] = None,   # broadcastable to [B, 1, 1, S]
+        x: torch.Tensor,  # [B, S] int or [B, S, feat]
+        mask: Optional[torch.Tensor] = None,  # broadcastable to [B, 1, 1, S]
     ) -> torch.Tensor:
 
         B, S = x.size(0), x.size(1)
         device = x.device
         if S > self.config.max_seq_len:
-            raise ValueError(
-                f"Sequence length {S} exceeds max_seq_len={self.config.max_seq_len}"
-            )
+            raise ValueError(f"Sequence length {S} exceeds max_seq_len={self.config.max_seq_len}")
 
         # input ↦ d_model
         if self.token_embedding is not None:
-            x = self.token_embedding(x) * (self.config.d_model ** 0.5)
+            x = self.token_embedding(x) * (self.config.d_model**0.5)
         elif self.input_projection is not None:
             if x.dim() != 3 or x.size(-1) != self.config.input_dim:
                 raise ValueError("Expected feature tensor of shape [B, S, input_dim]")

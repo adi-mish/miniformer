@@ -10,9 +10,10 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
+
 from miniformer.config.model_config import TransformerConfig
-from miniformer.model.encoder import Encoder      # existing encoder stack
-from miniformer.model.decoder import Decoder      # existing decoder stack
+from miniformer.model.decoder import Decoder  # existing decoder stack
+from miniformer.model.encoder import Encoder  # existing encoder stack
 
 __all__ = [
     "Seq2SeqTransformer",
@@ -20,12 +21,14 @@ __all__ = [
     "create_causal_mask",
 ]
 
+
 class Seq2SeqOutput:
     """
     Holds (dec_out, self_attns, cross_attns) but behaves like dec_out for
     indexing, shape, and torch operations, while still unpacking into three
     components.
     """
+
     def __init__(self, dec_out, self_attns, cross_attns):
         self._dec_out = dec_out
         self._self_attns = self_attns
@@ -64,6 +67,7 @@ class Seq2SeqOutput:
             new_args.append(a._dec_out if isinstance(a, Seq2SeqOutput) else a)
         return func(*new_args, **kwargs)
 
+
 def create_padding_mask(seq: torch.Tensor, pad_id: int = 0) -> torch.Tensor:
     """Create a mask to hide padding tokens.
 
@@ -86,14 +90,12 @@ def create_causal_mask(seq_len: int, device: torch.device) -> torch.Tensor:
     mask = torch.triu(torch.ones(seq_len, seq_len, device=device, dtype=torch.bool), diagonal=1)
     return ~mask.unsqueeze(0).unsqueeze(0)  # Add batch and head dims to match padding mask
 
+
 class Seq2SeqTransformer(nn.Module):
     """Full encoder-decoder wrapper that returns decoder hidden states."""
 
     def __init__(
-        self,
-        config: Optional[TransformerConfig] = None,
-        share_embeddings: bool = True,
-        **kwargs
+        self, config: Optional[TransformerConfig] = None, share_embeddings: bool = True, **kwargs
     ):
         super().__init__()
         # --- configuration -------------------------------------------------
@@ -115,12 +117,14 @@ class Seq2SeqTransformer(nn.Module):
             # tests want raw hidden states when no explicit output_dim
             self.decoder.output_projection = nn.Identity()
         else:
-            self.decoder.output_projection = nn.Linear(
-                config.d_model, config.output_dim
-            )
+            self.decoder.output_projection = nn.Linear(config.d_model, config.output_dim)
 
         # optionally tie token embeddings
-        if share_embeddings and self.encoder.token_embedding is not None and self.decoder.token_embedding is not None:
+        if (
+            share_embeddings
+            and self.encoder.token_embedding is not None
+            and self.decoder.token_embedding is not None
+        ):
             self.decoder.token_embedding.weight = self.encoder.token_embedding.weight
 
         # encoder input projection if needed
@@ -160,7 +164,7 @@ class Seq2SeqTransformer(nn.Module):
         if use_causal_mask:
             # causal mask [1,1,S,S] broadcasts cleanly against padding [B,1,1,S]
             causal = create_causal_mask(tgt.size(1), tgt.device)
-            tgt_mask = tgt_mask & causal         # final shape [B,1,S,S]
+            tgt_mask = tgt_mask & causal  # final shape [B,1,S,S]
         if memory_mask is None:
             memory_mask = src_mask
 
@@ -171,8 +175,10 @@ class Seq2SeqTransformer(nn.Module):
         # ── decode ─────────────────────────────────────────────────────
         need_hidden = isinstance(self.decoder.output_projection, nn.Identity)
         dec_out, self_attns, cross_attns = self.decoder(
-            tgt, memory,
-            tgt_mask, memory_mask,
+            tgt,
+            memory,
+            tgt_mask,
+            memory_mask,
             use_causal_mask=False,
             return_hidden=need_hidden,
         )
@@ -245,11 +251,7 @@ class Seq2SeqTransformer(nn.Module):
                 top_k = min(top_k, logits.size(-1))
                 values, _ = torch.topk(logits, top_k)
                 min_keep = values[:, -1].unsqueeze(-1)
-                logits = torch.where(
-                    logits < min_keep,
-                    torch.full_like(logits, -1e4),
-                    logits
-                )
+                logits = torch.where(logits < min_keep, torch.full_like(logits, -1e4), logits)
             if top_p < 1.0:
                 sorted_logits, sorted_idx = torch.sort(logits, descending=True)
                 cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)

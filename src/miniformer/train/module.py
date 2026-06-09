@@ -70,20 +70,33 @@ class MiniFormerModule(nn.Module):
                 input_ids[i, : ids.size(0)] = ids.to(self.device)
 
             label_dtype = torch.long if self.cfg.task == "classification" else torch.float
-            labels = torch.tensor([sample["labels"] for sample in batch], dtype=label_dtype, device=self.device)
+            labels = torch.tensor(
+                [sample["labels"] for sample in batch], dtype=label_dtype, device=self.device
+            )
             return input_ids, labels
 
-        if isinstance(batch, dict) and "input" in batch and isinstance(batch["input"], torch.Tensor):
+        if (
+            isinstance(batch, dict)
+            and "input" in batch
+            and isinstance(batch["input"], torch.Tensor)
+        ):
             return batch["input"].to(self.device), batch["labels"].to(self.device)
 
         if isinstance(batch, dict) and "input_ids" in batch:
             return batch["input_ids"].to(self.device), batch["labels"].to(self.device)
 
-        if isinstance(batch, list) and batch and isinstance(batch[0], dict) and "input" not in batch[0]:
+        if (
+            isinstance(batch, list)
+            and batch
+            and isinstance(batch[0], dict)
+            and "input" not in batch[0]
+        ):
             labels = None
             if "labels" in batch[0]:
                 dtype = torch.long if self.cfg.task == "classification" else torch.float
-                labels = torch.tensor([item["labels"] for item in batch], dtype=dtype, device=self.device)
+                labels = torch.tensor(
+                    [item["labels"] for item in batch], dtype=dtype, device=self.device
+                )
             return batch, labels
 
         if isinstance(batch, list) and batch and isinstance(batch[0], dict) and "input" in batch[0]:
@@ -152,7 +165,11 @@ class MiniFormerModule(nn.Module):
 
     def _compute_loss(self, batch_or_labels, outputs: torch.Tensor):
         if self.cfg.task == "language_modeling":
-            labels = batch_or_labels[-1] if isinstance(batch_or_labels, tuple) else batch_or_labels.get("labels")
+            labels = (
+                batch_or_labels[-1]
+                if isinstance(batch_or_labels, tuple)
+                else batch_or_labels.get("labels")
+            )
             if labels is None:
                 loss = torch.tensor(0.0, device=outputs.device)
             else:
@@ -194,7 +211,9 @@ class MiniFormerModule(nn.Module):
         metrics = {"val_loss": float(loss.detach().cpu())}
 
         if self.cfg.task == "language_modeling":
-            metrics["val_ppl"] = float(torch.exp(loss.detach()).cpu()) if loss.isfinite() else math.inf
+            metrics["val_ppl"] = (
+                float(torch.exp(loss.detach()).cpu()) if loss.isfinite() else math.inf
+            )
         elif self.cfg.task == "classification":
             preds = torch.argmax(predictions, dim=-1)
             metrics["val_accuracy"] = float((preds == labels).float().mean().detach().cpu())
@@ -224,7 +243,9 @@ class MiniFormerModule(nn.Module):
         torch.save(checkpoint, path)
 
     @classmethod
-    def load_checkpoint(cls, path: str | Path, cfg: Optional[TrainConfig] = None) -> "MiniFormerModule":
+    def load_checkpoint(
+        cls, path: str | Path, cfg: Optional[TrainConfig] = None
+    ) -> "MiniFormerModule":
         checkpoint = torch.load(path, map_location="cpu", weights_only=False)
         if cfg is None:
             cfg = TrainConfig(**checkpoint["cfg"])

@@ -55,7 +55,9 @@ def test_language_modeling_training(tmp_path):
     metrics = train_model(cfg, tokenizer=tokenizer, module=module)
 
     assert "val_ppl" in metrics
-    assert any(not torch.allclose(initial[name], param) for name, param in module.named_parameters())
+    assert any(
+        not torch.allclose(initial[name], param) for name, param in module.named_parameters()
+    )
 
     datamodule = MiniFormerDataModule(cfg, tokenizer=tokenizer)
     datamodule.setup()

@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader, Dataset
 
 class JSONLinesDataset(Dataset):
     """A minimal Dataset reading line-separated JSON records."""
+
     def __init__(self, path: str, tokenizer=None, task: str = "language_modeling"):
         super().__init__()
         self.data = []
@@ -23,7 +24,9 @@ class JSONLinesDataset(Dataset):
                 try:
                     record = ast.literal_eval(line)
                 except (SyntaxError, ValueError) as literal_error:
-                    raise ValueError(f"Invalid JSONL record at line {line_number}") from literal_error
+                    raise ValueError(
+                        f"Invalid JSONL record at line {line_number}"
+                    ) from literal_error
             if not isinstance(record, dict):
                 raise ValueError(f"JSONL record at line {line_number} must be an object")
             self.data.append(record)
@@ -40,7 +43,9 @@ class JSONLinesDataset(Dataset):
             txt = item["text"]
             if self.tokenizer is None:
                 raise ValueError("Tokenizer required for LM task")
-            ids = torch.tensor(self.tokenizer.encode(txt, add_special_tokens=True), dtype=torch.long)
+            ids = torch.tensor(
+                self.tokenizer.encode(txt, add_special_tokens=True), dtype=torch.long
+            )
             if ids.numel() < 2:
                 raise ValueError("Language modeling records must produce at least two tokens")
             return {"input_ids": ids[:-1], "labels": ids[1:]}
@@ -52,8 +57,10 @@ class JSONLinesDataset(Dataset):
             val = item.get("value", item.get("labels"))
             return {"input": item["input"], "labels": torch.tensor(val, dtype=torch.float)}
 
+
 class MiniFormerDataModule:
     """Small data loader factory for JSONL datasets."""
+
     def __init__(self, cfg, tokenizer=None):
         self.cfg = cfg
         self.tokenizer = tokenizer

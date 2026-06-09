@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import MISSING, asdict, dataclass, field, fields
 from typing import Any, Literal, get_args, get_origin, get_type_hints
 
+
 @dataclass
 class TrainConfig:
     # --- experiment ---------------------------------------------------------
@@ -43,12 +44,15 @@ class TrainConfig:
     model_config: dict[str, Any] = field(default_factory=dict)
 
     def save(self, path: str):
-        import json, pathlib
+        import json
+        import pathlib
+
         pathlib.Path(path).write_text(json.dumps(asdict(self), indent=2))
 
     @classmethod
     def from_cli(cls) -> "TrainConfig":
-        import argparse, json
+        import argparse
+        import json
 
         def default_for(field_):
             if field_.default is not MISSING:
@@ -95,13 +99,19 @@ class TrainConfig:
                 parser.add_argument(f"--{name}", action=argparse.BooleanOptionalAction, **kwargs)
             elif get_origin(arg_type) is Literal:
                 choices = get_args(arg_type)
-                parser.add_argument(f"--{name}", type=literal_parser(choices), choices=choices, **kwargs)
+                parser.add_argument(
+                    f"--{name}", type=literal_parser(choices), choices=choices, **kwargs
+                )
             elif get_origin(arg_type) is dict or arg_type is dict or name == "model_config":
                 parser.add_argument(f"--{name}", type=parse_json_dict, **kwargs)
             else:
-                parser.add_argument(f"--{name}", type=type(default) if default is not MISSING else str, **kwargs)
+                parser.add_argument(
+                    f"--{name}", type=type(default) if default is not MISSING else str, **kwargs
+                )
 
-        parser.add_argument("--config_json", type=str, help="Path to JSON config that overrides args", default=None)
+        parser.add_argument(
+            "--config_json", type=str, help="Path to JSON config that overrides args", default=None
+        )
         args = parser.parse_args()
         cfg_dict = vars(args)
 

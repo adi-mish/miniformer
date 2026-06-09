@@ -1,17 +1,11 @@
-import torch
 import matplotlib.pyplot as plt
+import torch
+
 from miniformer.model.transformer import Transformer
 from miniformer.visualization import plot_attention
 
 # Create a small transformer model
-model = Transformer(
-    vocab_size=1000,
-    d_model=64,
-    n_heads=4,
-    n_layers=3,
-    d_ff=256,
-    dropout=0.1
-)
+model = Transformer(vocab_size=1000, d_model=64, n_heads=4, n_layers=3, d_ff=256, dropout=0.1)
 
 # Create some sample data
 batch_size = 2
