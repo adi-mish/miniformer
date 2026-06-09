@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from miniformer.data.preprocessing import TextTokenizer
+from miniformer.data.tokenizers import TokenizerProtocol
 
 ValidationLevel = Literal["error", "warning"]
 TaskName = Literal["classification", "regression", "language_modeling"]
@@ -58,7 +58,7 @@ def validate_jsonl(
     path: str | Path,
     *,
     task: TaskName,
-    tokenizer: TextTokenizer | None = None,
+    tokenizer: TokenizerProtocol | None = None,
     max_seq_len: int | None = None,
     require_tokenizer: bool = False,
 ) -> JsonlValidationReport:
@@ -136,7 +136,7 @@ def _validate_record(
     line_number: int,
     issues: list[ValidationIssue],
     class_counts: Counter[str],
-    tokenizer: TextTokenizer | None,
+    tokenizer: TokenizerProtocol | None,
 ) -> int:
     if task == "language_modeling":
         text = record.get("text")
@@ -186,7 +186,7 @@ def _input_length(
     *,
     line_number: int,
     issues: list[ValidationIssue],
-    tokenizer: TextTokenizer | None,
+    tokenizer: TokenizerProtocol | None,
 ) -> int:
     if isinstance(value, str):
         if not value.strip():
@@ -233,7 +233,7 @@ def _input_length(
     return len(value)
 
 
-def _text_length(text: str, tokenizer: TextTokenizer | None) -> int:
+def _text_length(text: str, tokenizer: TokenizerProtocol | None) -> int:
     if tokenizer is not None:
         return len(tokenizer.encode(text, add_special_tokens=True))
     return len(text.split())

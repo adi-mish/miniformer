@@ -1,34 +1,37 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Protocol
+from typing import Any
 
 import torch
 
-from miniformer.utils.tokenization import stable_token_id
+from miniformer.data.tokenizers import TextTokenizer, TokenizerProtocol, ensure_tokenizer
 
-
-class TextTokenizer(Protocol):
-    """Minimal tokenizer interface used by data preprocessing."""
-
-    def encode(self, text: str, add_special_tokens: bool = True) -> Sequence[int]:
-        """Encode text into integer token IDs."""
-        ...
+__all__ = [
+    "TextTokenizer",
+    "TokenizerProtocol",
+    "attention_mask_from_lengths",
+    "collate_records",
+    "encode_text",
+    "encode_text_batch",
+    "pad_token_sequences",
+]
 
 
 def encode_text(
     text: object,
     *,
     vocab_size: int | None = None,
-    tokenizer: TextTokenizer | None = None,
+    tokenizer: TokenizerProtocol | None = None,
 ) -> torch.Tensor:
     """Encode one text value into a 1D long tensor."""
-    if tokenizer is not None:
-        ids = list(tokenizer.encode(str(text), add_special_tokens=True))
-    else:
-        if vocab_size is None:
-            raise ValueError("vocab_size is required when tokenizer is not provided")
-        ids = [stable_token_id(token, vocab_size) for token in str(text).split()]
+    text_value = str(text)
+    if not text_value.strip():
+        raise ValueError("String inputs must not be empty")
+    if vocab_size is None and tokenizer is None:
+        raise ValueError("vocab_size is required when tokenizer is not provided")
+    resolved = ensure_tokenizer(tokenizer, vocab_size=int(vocab_size or 0))
+    ids = list(resolved.encode(text_value, add_special_tokens=True))
     return torch.tensor(ids, dtype=torch.long)
 
 
@@ -73,7 +76,7 @@ def encode_text_batch(
     texts: Sequence[object],
     *,
     vocab_size: int,
-    tokenizer: TextTokenizer | None = None,
+    tokenizer: TokenizerProtocol | None = None,
     pad_id: int = 0,
 ) -> torch.Tensor:
     """Encode and pad text values into an integer token batch."""
@@ -116,7 +119,7 @@ def _collate_text_supervision(
     *,
     task: str,
     vocab_size: int,
-    tokenizer: TextTokenizer | None,
+    tokenizer: TokenizerProtocol | None,
 ) -> dict[str, torch.Tensor]:
     label_dtype = torch.long if task == "classification" else torch.float32
     sequences = [
@@ -206,7 +209,7 @@ def collate_records(
     *,
     task: str,
     vocab_size: int,
-    tokenizer: TextTokenizer | None = None,
+    tokenizer: TokenizerProtocol | None = None,
 ) -> dict[str, torch.Tensor]:
     """Collate JSONL records into tensor batches for the training module."""
     if not batch:

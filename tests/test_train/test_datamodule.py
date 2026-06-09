@@ -114,9 +114,9 @@ def test_datamodule_classification(tmp_path):
     dl = dm.train_dataloader()
     batch = next(iter(dl))
     assert set(batch) == {"input_ids", "attention_mask", "labels"}
-    assert batch["input_ids"].shape == (2, 1)
+    assert batch["input_ids"].shape == (2, 3)
     assert batch["input_ids"].dtype == torch.long
-    assert batch["attention_mask"].tolist() == [[True], [True]]
+    assert batch["attention_mask"].tolist() == [[True, True, True], [True, True, True]]
     assert batch["labels"].tolist() == [0, 1]
 
 

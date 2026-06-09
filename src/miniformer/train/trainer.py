@@ -8,6 +8,7 @@ from typing import Dict, Iterable, Optional, cast
 import numpy as np
 import torch
 
+from miniformer.data.tokenizers import TokenizerProtocol, ensure_tokenizer
 from miniformer.data.validation import TaskName, validate_jsonl
 
 from .artifacts import create_run_paths, write_run_manifest, write_train_config
@@ -106,20 +107,24 @@ def evaluate(module: MiniFormerModule, dataloader) -> Dict[str, float]:
 def train_model(
     cfg: TrainConfig,
     *,
-    tokenizer=None,
+    tokenizer: TokenizerProtocol | None = None,
     module: Optional[MiniFormerModule] = None,
     datamodule: Optional[MiniFormerDataModule] = None,
     ckpt_path: Optional[str | Path] = None,
 ) -> Dict[str, float]:
     seed_everything(cfg.seed, cfg.deterministic)
     device = torch.device("cuda" if torch.cuda.is_available() and cfg.gpus > 0 else "cpu")
+    resolved_tokenizer = ensure_tokenizer(
+        tokenizer,
+        vocab_size=int(cfg.model_config.get("vocab_size", 30522)),
+    )
 
     run_paths = create_run_paths(cfg)
     write_train_config(cfg, run_paths.config)
     write_run_manifest(run_paths.manifest, cfg=cfg, status="started", device=device)
-    _validate_configured_datasets(cfg, tokenizer=tokenizer)
+    _validate_configured_datasets(cfg, tokenizer=resolved_tokenizer)
 
-    datamodule = datamodule or MiniFormerDataModule(cfg, tokenizer)
+    datamodule = datamodule or MiniFormerDataModule(cfg, resolved_tokenizer)
     datamodule.setup()
     train_loader = datamodule.train_dataloader()
     val_loader = datamodule.val_dataloader() if cfg.val_path else None
@@ -204,11 +209,12 @@ def train_model(
     return best_metrics or metrics
 
 
-def _validate_configured_datasets(cfg: TrainConfig, *, tokenizer=None) -> None:
+def _validate_configured_datasets(
+    cfg: TrainConfig, *, tokenizer: TokenizerProtocol | None = None
+) -> None:
     task = cast(TaskName, cfg.task)
     max_seq_len_value = cfg.model_config.get("max_seq_len")
     max_seq_len = int(max_seq_len_value) if max_seq_len_value is not None else None
-    require_tokenizer = cfg.task == "language_modeling"
 
     for path in [cfg.train_path, cfg.val_path, cfg.test_path]:
         if not path:
@@ -218,7 +224,7 @@ def _validate_configured_datasets(cfg: TrainConfig, *, tokenizer=None) -> None:
             task=task,
             tokenizer=tokenizer,
             max_seq_len=max_seq_len,
-            require_tokenizer=require_tokenizer,
+            require_tokenizer=False,
         )
         report.raise_for_errors()
 
@@ -226,16 +232,14 @@ def _validate_configured_datasets(cfg: TrainConfig, *, tokenizer=None) -> None:
 def main():
     cfg = TrainConfig.from_cli()
 
-    tokenizer = None
+    tokenizer: TokenizerProtocol | None = None
     if cfg.task == "language_modeling":
         try:
             from transformers import AutoTokenizer
 
             tokenizer = AutoTokenizer.from_pretrained("gpt2")
-        except ImportError as exc:
-            raise ImportError(
-                "Install miniformer[tokenizers] or provide your own tokenizer"
-            ) from exc
+        except ImportError:
+            tokenizer = None
 
     metrics = train_model(cfg, tokenizer=tokenizer)
     if metrics:

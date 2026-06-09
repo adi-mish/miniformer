@@ -10,9 +10,16 @@ def test_top_level_exports_data_helpers():
         vocab_size=32,
     )
 
-    assert batch["input_ids"].shape == (2, 2)
-    assert batch["attention_mask"].tolist() == [[True, True], [True, False]]
+    assert batch["input_ids"].shape == (2, 4)
+    assert batch["attention_mask"].tolist() == [
+        [True, True, True, True],
+        [True, True, True, False],
+    ]
     assert batch["labels"].tolist() == [1, 0]
+    typed = miniformer.Batch.from_mapping(batch)
+    assert typed.kind == "tokens"
+    tokenizer = miniformer.WhitespaceHashTokenizer(vocab_size=32)
+    assert isinstance(tokenizer, miniformer.TokenizerProtocol)
     assert miniformer.attention_mask_from_lengths([1, 2]).tolist() == [
         [True, False],
         [True, True],

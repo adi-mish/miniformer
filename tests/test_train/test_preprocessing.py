@@ -8,6 +8,7 @@ from miniformer.data.preprocessing import (
     encode_text_batch,
     pad_token_sequences,
 )
+from miniformer.data.tokenizers import WhitespaceHashTokenizer
 
 
 class DummyTokenizer:
@@ -30,10 +31,22 @@ def test_encode_text_uses_tokenizer_when_supplied():
 def test_encode_text_batch_hashes_and_pads_text():
     batch = encode_text_batch(["hello world", "hello"], vocab_size=100)
 
-    assert batch.shape == (2, 2)
+    assert batch.shape == (2, 4)
     assert batch.dtype == torch.long
     assert batch[0, 0] == batch[1, 0]
-    assert batch[1, 1] == 0
+    assert batch[0, 0].item() == 1
+    assert batch[0, -1].item() == 2
+    assert batch[1, 3] == 0
+
+
+def test_whitespace_hash_tokenizer_is_explicit_and_deterministic():
+    tokenizer = WhitespaceHashTokenizer(vocab_size=50)
+
+    ids = list(tokenizer.encode("alpha beta"))
+
+    assert ids[0] == tokenizer.bos_token_id
+    assert ids[-1] == tokenizer.eos_token_id
+    assert ids == list(tokenizer.encode("alpha beta"))
 
 
 def test_pad_token_sequences_rejects_empty_sequences():
@@ -56,8 +69,11 @@ def test_collate_records_string_classification_returns_tensor_batch():
     )
 
     assert set(batch) == {"input_ids", "attention_mask", "labels"}
-    assert batch["input_ids"].shape == (2, 2)
-    assert batch["attention_mask"].tolist() == [[True, True], [True, False]]
+    assert batch["input_ids"].shape == (2, 4)
+    assert batch["attention_mask"].tolist() == [
+        [True, True, True, True],
+        [True, True, True, False],
+    ]
     assert batch["labels"].dtype == torch.long
     assert batch["labels"].tolist() == [1, 0]
 
@@ -69,8 +85,8 @@ def test_collate_records_string_regression_accepts_value_field():
         vocab_size=50,
     )
 
-    assert batch["input_ids"].shape == (2, 1)
-    assert batch["attention_mask"].tolist() == [[True], [True]]
+    assert batch["input_ids"].shape == (2, 3)
+    assert batch["attention_mask"].tolist() == [[True, True, True], [True, True, True]]
     assert batch["labels"].dtype == torch.float32
     assert batch["labels"].tolist() == pytest.approx([1.5, 2.5])
 

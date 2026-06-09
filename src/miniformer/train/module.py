@@ -3,13 +3,14 @@ from __future__ import annotations
 import math
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, cast
+from typing import Any, Dict, Mapping, Optional, Tuple, cast
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from miniformer.config.model_config import TransformerConfig
+from miniformer.data.batch import Batch, BatchKind
 from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
 from miniformer.model.transformer import Transformer
 from miniformer.train.checkpoints import (
@@ -55,46 +56,33 @@ class MiniFormerModule(nn.Module):
     def device(self) -> torch.device:
         return next(self.parameters()).device
 
-    def _preprocess_batch(
-        self, batch: Any
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
-        """Move already-collated tensor batches to this module's device."""
-        if not isinstance(batch, dict):
+    def _preprocess_batch(self, batch: Any) -> Batch:
+        """Normalize already-collated batches into a typed Batch on this module's device."""
+        if isinstance(batch, Batch):
+            typed = batch
+        elif isinstance(batch, Mapping):
+            kind: BatchKind = (
+                "language_modeling" if self.cfg.task == "language_modeling" else "tokens"
+            )
+            if "input" in batch:
+                kind = "features"
+            typed = Batch.from_mapping(batch, kind=kind)
+        else:
             raise TypeError(
-                "MiniFormerModule expects a tensor batch dictionary. "
+                "MiniFormerModule expects a Batch or tensor batch dictionary. "
                 "Use MiniFormerDataModule or miniformer.data.preprocessing to collate data."
             )
 
-        if isinstance(batch.get("input_ids"), torch.Tensor):
-            inputs = batch["input_ids"].to(self.device)
-        elif isinstance(batch.get("input"), torch.Tensor):
-            inputs = batch["input"].to(self.device)
-        else:
-            raise TypeError(
-                "MiniFormerModule expects batch['input_ids'] or batch['input'] to be a tensor. "
-                "Raw text and records belong in miniformer.data.preprocessing."
-            )
-
-        labels = batch.get("labels")
-        if labels is not None and not isinstance(labels, torch.Tensor):
-            raise TypeError("MiniFormerModule expects batch['labels'] to be a tensor when present")
-
-        attention_mask = batch.get("attention_mask")
-        if attention_mask is None and self.cfg.task != "language_modeling":
+        typed = typed.to(self.device)
+        if typed.attention_mask is None and self.cfg.task != "language_modeling":
             attention_mask = torch.ones(
-                inputs.size(0),
-                inputs.size(1),
+                typed.inputs.size(0),
+                typed.inputs.size(1),
                 dtype=torch.bool,
-                device=inputs.device,
+                device=typed.inputs.device,
             )
-        elif attention_mask is not None:
-            if not isinstance(attention_mask, torch.Tensor):
-                raise TypeError("MiniFormerModule expects batch['attention_mask'] to be a tensor")
-            if attention_mask.shape != inputs.shape[:2]:
-                raise ValueError("attention_mask must match input batch and sequence dimensions")
-            attention_mask = attention_mask.to(self.device, dtype=torch.bool)
-
-        return inputs, labels.to(self.device) if labels is not None else None, attention_mask
+            typed = typed.with_attention_mask(attention_mask)
+        return typed
 
     @staticmethod
     def _to_attention_mask(attention_mask: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
@@ -103,17 +91,20 @@ class MiniFormerModule(nn.Module):
         return attention_mask.unsqueeze(1).unsqueeze(2)
 
     def forward_batch(self, batch) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        x, y, attention_mask = self._preprocess_batch(batch)
+        typed = self._preprocess_batch(batch)
         if self.cfg.task == "language_modeling":
-            outputs = self.model(x, x, use_causal_mask=True).output
+            outputs = self.model(typed.inputs, typed.inputs, use_causal_mask=True).output
         else:
-            sequence_outputs = self.model(x, mask=self._to_attention_mask(attention_mask)).output
+            sequence_outputs = self.model(
+                typed.inputs,
+                mask=self._to_attention_mask(typed.attention_mask),
+            ).output
             outputs = pool_sequence_outputs(
                 sequence_outputs,
-                attention_mask,
+                typed.attention_mask,
                 mode=self.pooling,
             )
-        return outputs, y
+        return outputs, typed.labels
 
     @property
     def pooling(self) -> PoolingMode:

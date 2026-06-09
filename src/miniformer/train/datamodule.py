@@ -7,7 +7,8 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from miniformer.data.preprocessing import TextTokenizer, collate_records, encode_text
+from miniformer.data.preprocessing import collate_records, encode_text
+from miniformer.data.tokenizers import TokenizerProtocol, ensure_tokenizer
 
 
 class JSONLinesDataset(Dataset):
@@ -16,7 +17,7 @@ class JSONLinesDataset(Dataset):
     def __init__(
         self,
         path: str,
-        tokenizer: TextTokenizer | None = None,
+        tokenizer: TokenizerProtocol | None = None,
         task: str = "language_modeling",
     ):
         super().__init__()
@@ -68,9 +69,12 @@ class JSONLinesDataset(Dataset):
 class MiniFormerDataModule:
     """Small data loader factory for JSONL datasets."""
 
-    def __init__(self, cfg, tokenizer: TextTokenizer | None = None):
+    def __init__(self, cfg, tokenizer: TokenizerProtocol | None = None):
         self.cfg = cfg
-        self.tokenizer = tokenizer
+        self.tokenizer = ensure_tokenizer(tokenizer, vocab_size=self._vocab_size())
+
+    def _vocab_size(self) -> int:
+        return int(getattr(self.cfg, "model_config", {}).get("vocab_size", 30522))
 
     def setup(self, stage: str | None = None):
         if self.cfg.train_path:
@@ -111,10 +115,9 @@ class MiniFormerDataModule:
         )
 
     def _collate_fn(self, batch):
-        vocab_size = int(getattr(self.cfg, "model_config", {}).get("vocab_size", 30522))
         return collate_records(
             batch,
             task=self.cfg.task,
-            vocab_size=vocab_size,
+            vocab_size=self._vocab_size(),
             tokenizer=self.tokenizer,
         )
