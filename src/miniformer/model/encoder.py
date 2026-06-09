@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from dataclasses import dataclass
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
@@ -8,6 +9,14 @@ import torch.nn as nn
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.attention import MultiHeadAttention
 from miniformer.model.feedforward import FeedForward
+
+
+@dataclass(frozen=True)
+class EncoderLayerOutput:
+    """Explicit output for one encoder layer."""
+
+    hidden_states: torch.Tensor
+    self_attention: Optional[torch.Tensor]
 
 
 class EncoderLayer(nn.Module):
@@ -39,8 +48,8 @@ class EncoderLayer(nn.Module):
         self,
         x: torch.Tensor,
         mask: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        """Return (output, attn_weights)."""
+    ) -> EncoderLayerOutput:
+        """Run one encoder layer."""
 
         # ── self-attention ────────────────────────────────────────────────
         residual = x
@@ -58,7 +67,7 @@ class EncoderLayer(nn.Module):
         if not self.pre_norm:
             x = self.norm2(x)
 
-        return x, attn
+        return EncoderLayerOutput(hidden_states=x, self_attention=attn)
 
 
 class Encoder(nn.Module):
@@ -130,7 +139,8 @@ class Encoder(nn.Module):
         # run blocks
         self.attn_weights = []
         for layer in self.layers:
-            x, attn = layer(x, mask)
-            self.attn_weights.append(attn)
+            layer_output = layer(x, mask)
+            x = layer_output.hidden_states
+            self.attn_weights.append(layer_output.self_attention)
 
         return x

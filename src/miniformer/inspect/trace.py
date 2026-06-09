@@ -125,8 +125,6 @@ class _LayerState:
 def _as_tensor(output: Any) -> Optional[torch.Tensor]:
     if isinstance(output, torch.Tensor):
         return output
-    if isinstance(output, (tuple, list)) and output and isinstance(output[0], torch.Tensor):
-        return output[0]
     if hasattr(output, "output") and isinstance(output.output, torch.Tensor):
         return output.output
     if hasattr(output, "logits") and isinstance(output.logits, torch.Tensor):
@@ -522,6 +520,9 @@ def capture_transformer_trace(
         out: Any,
     ) -> None:
         tensor = _as_tensor(out)
+        if tensor is None and isinstance(out, (tuple, list)) and out:
+            first = out[0]
+            tensor = first if isinstance(first, torch.Tensor) else None
         layer_name = name.rsplit(".", 1)[0]
         state = ensure_layer(layer_name)
         if tensor is not None:

@@ -26,24 +26,16 @@ class DecoderOutput:
     cross_attentions: AttentionList
     past_key_values: Optional[DecoderPastKeyValues] = None
 
-    def __iter__(self):
-        """Preserve tuple-unpacking compatibility for existing decoder callers."""
-        yield self.output
-        yield self.self_attentions
-        yield self.cross_attentions
-        if self.past_key_values is not None:
-            yield self.past_key_values
 
-    def __getitem__(self, index: int):
-        if index == 0:
-            return self.output
-        if index == 1:
-            return self.self_attentions
-        if index == 2:
-            return self.cross_attentions
-        if index == 3 and self.past_key_values is not None:
-            return self.past_key_values
-        raise IndexError(index)
+@dataclass(frozen=True)
+class DecoderLayerOutput:
+    """Explicit output for one decoder layer."""
+
+    hidden_states: torch.Tensor
+    self_attention: Optional[torch.Tensor]
+    cross_attention: Optional[torch.Tensor]
+    self_key_values: Optional[KeyValue]
+    cross_key_values: Optional[KeyValue]
 
 
 class DecoderLayer(nn.Module):
@@ -88,13 +80,7 @@ class DecoderLayer(nn.Module):
         past_self: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         past_cross: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         use_cache: bool = False,
-    ) -> Tuple[
-        torch.Tensor,
-        Optional[torch.Tensor],
-        Optional[torch.Tensor],
-        Optional[KeyValue],
-        Optional[KeyValue],
-    ]:
+    ) -> DecoderLayerOutput:
 
         # choose norm order
         residual = x
@@ -142,7 +128,13 @@ class DecoderLayer(nn.Module):
         if not self.pre_norm:
             x = self.norm3(x)
 
-        return x, self_attn, cross_attn, new_self, new_cross
+        return DecoderLayerOutput(
+            hidden_states=x,
+            self_attention=self_attn,
+            cross_attention=cross_attn,
+            self_key_values=new_self,
+            cross_key_values=new_cross,
+        )
 
 
 class Decoder(nn.Module):
@@ -201,7 +193,7 @@ class Decoder(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def create_causal_mask(
+    def _create_causal_mask(
         self,
         seq_len: int,
         device: torch.device,
@@ -227,7 +219,6 @@ class Decoder(nn.Module):
             ]
         ] = None,
         use_cache: bool = False,
-        return_hidden: bool = False,
     ) -> DecoderOutput:
         """Run the decoder stack and return projected output, attentions, and optional cache."""
         batch_size, seq_len = x.size(0), x.size(1)
@@ -264,7 +255,7 @@ class Decoder(nn.Module):
         x = self.dropout(x + self.position_encoding(positions))
 
         if use_causal_mask and self_attn_mask is None:
-            self_attn_mask = self.create_causal_mask(seq_len, device, past_len)
+            self_attn_mask = self._create_causal_mask(seq_len, device, past_len)
 
         self_attentions: AttentionList = []
         cross_attentions: AttentionList = []
@@ -275,7 +266,7 @@ class Decoder(nn.Module):
         # ── transformer layers ───────────────────────────────────────────
         for i, layer in enumerate(self.layers):
             past_self, past_cross = past_key_values[i]
-            x, self_attn, cross_attn, new_self, new_cross = layer(
+            layer_output = layer(
                 x,
                 encoder_output,
                 self_attn_mask,
@@ -284,19 +275,17 @@ class Decoder(nn.Module):
                 past_cross,
                 use_cache,
             )
-            self_attentions.append(self_attn)
-            cross_attentions.append(cross_attn)
+            x = layer_output.hidden_states
+            self_attentions.append(layer_output.self_attention)
+            cross_attentions.append(layer_output.cross_attention)
             if use_cache:
-                new_past_kv.append((new_self, new_cross))
+                new_past_kv.append((layer_output.self_key_values, layer_output.cross_key_values))
 
         self.self_attentions = self_attentions
         self.cross_attentions = cross_attentions
 
-        # ── final projection (optional) ──────────────────────────────────
-        output = x if return_hidden else self.output_projection(x)
-
         return DecoderOutput(
-            output=output,
+            output=self.output_projection(x),
             self_attentions=self_attentions,
             cross_attentions=cross_attentions,
             past_key_values=new_past_kv if use_cache else None,

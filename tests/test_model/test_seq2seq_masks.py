@@ -125,6 +125,8 @@ def test_decoder_cache_matches_full_pass_for_chunked_targets():
             cross_attn_mask=src_mask,
             use_causal_mask=True,
         )
+        with pytest.raises(TypeError):
+            _ = full_decoder_output[0]
         full_out = full_decoder_output.output
 
         past_key_values = None
