@@ -32,10 +32,12 @@ class MiniFormerModule(nn.Module):
             raise ValueError(f"{cfg.task} currently requires model='encoder'")
 
         model_config = dict(cfg.model_config)
-        if cfg.task == "language_modeling" and model_config.get("output_dim") is None:
-            model_config["output_dim"] = model_config.get("vocab_size")
+        if cfg.task == "language_modeling" and model_config.get("output_mode") != "vocab":
+            raise ValueError("language_modeling requires model_config['output_mode']='vocab'")
         if cfg.task != "language_modeling" and model_config.get("output_dim") is None:
             raise ValueError(f"{cfg.task} requires model_config['output_dim']")
+        if cfg.task != "language_modeling" and model_config.get("output_mode") != "projection":
+            raise ValueError(f"{cfg.task} requires model_config['output_mode']='projection'")
         if cfg.task != "language_modeling" and "causal" not in model_config:
             model_config["causal"] = False
         self.cfg.model_config = model_config
@@ -133,7 +135,7 @@ class MiniFormerModule(nn.Module):
         if self.cfg.task == "language_modeling":
             outputs = self.model(x, x, use_causal_mask=True).output
         else:
-            outputs = self.model(x)
+            outputs = self.model(x).output
         return outputs, y
 
     def configure_optimizers(self, steps_per_epoch: Optional[int] = None):

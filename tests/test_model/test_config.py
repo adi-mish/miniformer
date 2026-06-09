@@ -15,7 +15,8 @@ def test_valid_config_combinations(d_model, n_heads):
     # Test forward pass works
     x = torch.randint(0, 100, (2, 10))
     output = model(x)
-    assert output.shape == (2, 10, d_model)
+    assert output.hidden_states is not None
+    assert output.output.shape == (2, 10, d_model)
 
 
 def test_invalid_n_heads_not_divisible():
@@ -40,7 +41,7 @@ def test_invalid_rotary_pct():
 
 def test_optional_attention_config_serializes(tmp_path):
     """Test optional attention fields are first-class config fields."""
-    config = TransformerConfig(pre_norm=False, use_sdpa=True, rotary_pct=0.5)
+    config = TransformerConfig(pre_norm=False, use_sdpa=True, position_mode="rope", rotary_pct=0.5)
 
     path = tmp_path / "config.json"
     config.save_json(path)
@@ -48,12 +49,20 @@ def test_optional_attention_config_serializes(tmp_path):
 
     assert loaded.pre_norm is False
     assert loaded.use_sdpa is True
+    assert loaded.position_mode == "rope"
     assert loaded.rotary_pct == pytest.approx(0.5)
 
 
 def test_input_dim_projection():
     """Test that input_dim != d_model creates proper projection layer."""
-    config = TransformerConfig(input_dim=5, d_model=32, n_heads=4, n_layers=2, output_dim=1)
+    config = TransformerConfig(
+        input_dim=5,
+        d_model=32,
+        n_heads=4,
+        n_layers=2,
+        output_mode="projection",
+        output_dim=1,
+    )
     model = Transformer(config)
 
     # Should have input projection
@@ -65,4 +74,33 @@ def test_input_dim_projection():
     # Test forward pass
     x = torch.randn(2, 10, 5)
     output = model(x)
-    assert output.shape == (2, 10, 1)
+    assert output.projection is not None
+    assert output.output.shape == (2, 10, 1)
+
+
+def test_output_mode_config_validation():
+    with pytest.raises(ValueError, match="Unknown output_mode"):
+        TransformerConfig(output_mode="guess")
+
+    with pytest.raises(ValueError, match="hidden.*output_dim=None"):
+        TransformerConfig(output_dim=2)
+
+    with pytest.raises(ValueError, match="vocab.*token inputs"):
+        TransformerConfig(input_dim=5, output_mode="vocab")
+
+    with pytest.raises(ValueError, match="projection.*requires output_dim"):
+        TransformerConfig(output_mode="projection")
+
+
+def test_position_mode_config_validation():
+    with pytest.raises(ValueError, match="Unknown position_mode"):
+        TransformerConfig(position_mode="absolute")
+
+    with pytest.raises(ValueError, match="learned.*rotary_pct=0"):
+        TransformerConfig(position_mode="learned", rotary_pct=0.25)
+
+    with pytest.raises(ValueError, match="rope.*rotary_pct > 0"):
+        TransformerConfig(position_mode="rope", rotary_pct=0.0)
+
+    with pytest.raises(ValueError, match="learned\\+rope.*rotary_pct > 0"):
+        TransformerConfig(position_mode="learned+rope", rotary_pct=0.0)

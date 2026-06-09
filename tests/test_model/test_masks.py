@@ -1,6 +1,7 @@
 import pytest
 import torch
 
+import miniformer.model.seq2seq_transformer as seq2seq_module
 from miniformer.model.masks import (
     causal_mask,
     combine_masks,
@@ -8,7 +9,6 @@ from miniformer.model.masks import (
     self_attention_mask,
     validate_attention_mask,
 )
-from miniformer.model.seq2seq_transformer import create_causal_mask, create_padding_mask
 
 
 def test_padding_mask_marks_token_padding_keys_only():
@@ -106,8 +106,6 @@ def test_self_attention_mask_uses_shared_semantics():
     ]
 
 
-def test_seq2seq_legacy_mask_helpers_delegate_to_canonical_masks():
-    tokens = torch.tensor([[1, 0]])
-
-    assert torch.equal(create_padding_mask(tokens), padding_mask(tokens))
-    assert torch.equal(create_causal_mask(2, tokens.device), causal_mask(2, device=tokens.device))
+def test_seq2seq_legacy_mask_helpers_are_not_public_api():
+    assert not hasattr(seq2seq_module, "create_padding_mask")
+    assert not hasattr(seq2seq_module, "create_causal_mask")

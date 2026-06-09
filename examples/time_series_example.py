@@ -63,6 +63,7 @@ def main():
     config = TransformerConfig(
         input_dim=input_dim,  # Use input_dim since we're working with features, not tokens
         d_model=16,
+        output_mode="projection",
         output_dim=output_dim,
         n_heads=4,
         n_layers=2,
@@ -85,7 +86,7 @@ def main():
         total_loss = 0.0
         for x_batch, y_batch in train_loader:
             optimizer.zero_grad()
-            y_pred = model(x_batch)
+            y_pred = model(x_batch).output
             loss = loss_fn(y_pred, y_batch)
             loss.backward()
             optimizer.step()
@@ -97,7 +98,7 @@ def main():
     x, y_true = val_dataset[0]
     x = x.unsqueeze(0)  # Add batch dimension
     with torch.no_grad():
-        y_pred = model(x)
+        y_pred = model(x).output
 
     # Plot results
     plt.figure(figsize=(10, 6))

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -9,6 +9,7 @@ import torch.nn as nn
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.encoder import Encoder
 from miniformer.model.masks import padding_mask, self_attention_mask
+from miniformer.model.outputs import TransformerModelOutput
 from miniformer.utils.tokenization import stable_token_id
 
 if TYPE_CHECKING:
@@ -19,15 +20,7 @@ class Transformer(nn.Module):
 
     def __init__(self, config: Optional[TransformerConfig] = None, **kwargs):
         """
-        Build an **encoder-only** Transformer.
-
-        • If ``output_dim`` is given we always project to that size.
-        • Otherwise we use a simple heuristic:
-            – **token path**  (vocab available) → project back to *vocab_size*
-              *only* when the vocabulary is at least 10 × ``d_model``.
-            – **feature path** → keep the hidden size (*d_model*).
-        • When we project to *vocab_size* we **tie** the weights with the
-          input embedding (classic weight-tying).
+        Build an encoder-only Transformer with an explicit output mode.
         """
         super().__init__()
 
@@ -47,27 +40,20 @@ class Transformer(nn.Module):
         self.input_projection = self.encoder.input_projection  # expose for tests
         self.output_projection: nn.Module
 
-        # ── decide projection dimensionality ─────────────────────────────
-        if config.output_dim is not None:  # explicit override
-            target_dim = config.output_dim
-        else:
-            # tie back to vocab only if vocab is “much” larger than hidden
-            if config.input_dim is None and config.vocab_size >= 10 * config.d_model:
-                target_dim = config.vocab_size
-            else:  # feature-style usage
-                target_dim = config.d_model
-
-        # ── build projection head + optional weight-tying ────────────────
-        if target_dim == config.vocab_size and self.token_embedding is not None:
-            # classic weight-tying
-            self.output_projection = self.token_embedding
-            self._tied_weights = True
-        elif target_dim == config.d_model:
+        if config.output_mode == "hidden":
             self.output_projection = nn.Identity()
             self._tied_weights = False
-        else:
-            self.output_projection = nn.Linear(config.d_model, target_dim)
+        elif config.output_mode == "vocab":
+            if self.token_embedding is None:
+                raise ValueError("output_mode='vocab' requires token embeddings")
+            self._tied_weights = True
+            self.output_projection = nn.Identity()
+        elif config.output_mode == "projection":
+            assert config.output_dim is not None
+            self.output_projection = nn.Linear(config.d_model, config.output_dim)
             self._tied_weights = False
+        else:
+            raise ValueError(f"Unknown output_mode: {config.output_mode}")
 
     def _build_mask(self, seq: torch.Tensor) -> torch.Tensor:
         """Build a padding mask, with optional autoregressive masking."""
@@ -81,7 +67,7 @@ class Transformer(nn.Module):
         past_key_values: Optional[torch.Tensor] = None,
         use_cache: bool = False,
         **kwargs,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    ) -> TransformerModelOutput:
         """
         Standard path (``use_cache=False``)
         -----------------------------------
@@ -152,19 +138,25 @@ class Transformer(nn.Module):
             )
         h_full = self.encoder(x_full, mask)  # [B, S_total, d_model]
 
-        # ----- projection (tied / linear / identity) ------------------------
+        # ----- explicit output head -----------------------------------------
         if getattr(self, "_tied_weights", False) and self.token_embedding is not None:
-            proj_full = torch.matmul(h_full, self.token_embedding.weight.t())
+            out_full = torch.matmul(h_full, self.token_embedding.weight.t())
         else:
-            proj_full = self.output_projection(h_full)
+            out_full = self.output_projection(h_full)
 
-        if not use_cache:
-            return proj_full
-        else:
-            # slice out the freshly generated tokens
-            out_new = proj_full[:, -x.size(1) :, :].contiguous()
+        if use_cache:
+            out = out_full[:, -x.size(1) :, :].contiguous()
             assert new_past is not None
-            return out_new, new_past
+        else:
+            out = out_full
+
+        return TransformerModelOutput(
+            logits=out if self.config.output_mode == "vocab" else None,
+            hidden_states=out if self.config.output_mode == "hidden" else None,
+            projection=out if self.config.output_mode == "projection" else None,
+            self_attentions=self.encoder.attn_weights,
+            past_key_values=new_past,
+        )
 
     def _create_mask(self, x):
         """Create a mask to hide padding tokens"""

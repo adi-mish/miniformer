@@ -174,15 +174,16 @@ class Decoder(nn.Module):
         # Decoder layers
         self.layers = nn.ModuleList([DecoderLayer(config) for _ in range(config.n_layers)])
 
-        # Output projection based on task type
-        if self.token_embedding is not None:
-            # Language modeling task
+        # Output projection based on explicit model mode
+        if config.output_mode == "hidden":
+            self.output_projection = nn.Identity()
+        elif config.output_mode == "vocab":
             self.output_projection = nn.Linear(config.d_model, config.vocab_size)
-        else:
-            # Classification or regression task
-            if config.output_dim is None:
-                raise ValueError("output_dim must be specified for non-token-based tasks.")
+        elif config.output_mode == "projection":
+            assert config.output_dim is not None
             self.output_projection = nn.Linear(config.d_model, config.output_dim)
+        else:
+            raise ValueError(f"Unknown output_mode: {config.output_mode}")
 
         # Apply weight initialization
         self.apply(self._init_weights)

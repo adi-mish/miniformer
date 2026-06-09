@@ -6,7 +6,12 @@ from miniformer.model.transformer import Transformer, TransformerConfig
 def test_backward_pass_finite_gradients():
     """Test that backward pass produces finite gradients."""
     config = TransformerConfig(
-        vocab_size=100, d_model=32, n_heads=4, n_layers=2, output_dim=10  # Classification task
+        vocab_size=100,
+        d_model=32,
+        n_heads=4,
+        n_layers=2,
+        output_mode="projection",
+        output_dim=10,
     )
     model = Transformer(config)
 
@@ -15,7 +20,7 @@ def test_backward_pass_finite_gradients():
     targets = torch.randint(0, 10, (2, 8))
 
     # Forward pass
-    logits = model(x)
+    logits = model(x).output
     loss_fn = torch.nn.CrossEntropyLoss()
     loss = loss_fn(logits.view(-1, 10), targets.view(-1))
 
@@ -45,16 +50,16 @@ def test_dropout_train_vs_eval():
     # In eval mode, outputs should be deterministic
     model.eval()
     with torch.no_grad():
-        output1 = model(x)
-        output2 = model(x)
+        output1 = model(x).output
+        output2 = model(x).output
 
     assert torch.allclose(output1, output2, atol=1e-6), "Eval mode should be deterministic"
 
     # In train mode, outputs should be different due to dropout
     model.train()
     with torch.no_grad():
-        output3 = model(x)
-        output4 = model(x)
+        output3 = model(x).output
+        output4 = model(x).output
 
     # Should be different (with high probability given 50% dropout)
     assert not torch.allclose(
@@ -67,7 +72,12 @@ def test_mini_fit_toy_task():
     # make this run deterministically and disable dropout so it always overfits
     torch.manual_seed(0)
     config = TransformerConfig(
-        vocab_size=10, d_model=32, n_heads=4, n_layers=2, output_dim=10, dropout=0.0
+        vocab_size=10,
+        d_model=32,
+        n_heads=4,
+        n_layers=2,
+        output_mode="vocab",
+        dropout=0.0,
     )
     model = Transformer(config)
 
@@ -85,7 +95,7 @@ def test_mini_fit_toy_task():
     for step in range(50):  # Small number of steps
         optimizer.zero_grad()
 
-        logits = model(x)
+        logits = model(x).output
         loss = loss_fn(logits.view(-1, 10), y.view(-1))
 
         if step == 0:
@@ -112,7 +122,7 @@ def test_gradient_flow():
     x = torch.randint(0, 100, (2, 10))
 
     # Forward pass
-    output = model(x)
+    output = model(x).output
     loss = output.sum()  # Simple loss for gradient computation
 
     # Backward pass

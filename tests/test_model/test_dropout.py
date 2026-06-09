@@ -19,8 +19,8 @@ def test_dropout_train_vs_eval_determinism():
     # In eval mode, outputs should be deterministic
     model.eval()
     with torch.no_grad():
-        output1 = model(x)
-        output2 = model(x)
+        output1 = model(x).output
+        output2 = model(x).output
 
     assert torch.allclose(output1, output2, atol=1e-6), "Eval mode should be deterministic"
 
@@ -28,11 +28,11 @@ def test_dropout_train_vs_eval_determinism():
     model.train()
     torch.manual_seed(42)  # Reset seed
     with torch.no_grad():
-        output3 = model(x)
+        output3 = model(x).output
 
     torch.manual_seed(43)  # Different seed
     with torch.no_grad():
-        output4 = model(x)
+        output4 = model(x).output
 
     # Should be different (with high probability given 50% dropout)
     assert not torch.allclose(
@@ -52,7 +52,7 @@ def test_dropout_consistency_across_layers():
     outputs = []
     for _ in range(3):
         with torch.no_grad():
-            outputs.append(model(x))
+            outputs.append(model(x).output)
 
     for i in range(1, len(outputs)):
         assert torch.allclose(
@@ -70,7 +70,7 @@ def test_dropout_preserves_shape():
     x = torch.randint(0, 50, (3, 12))
 
     model.train()
-    output = model(x)
+    output = model(x).output
 
     assert output.shape == (3, 12, 48), "Dropout should not change output shape"
     assert torch.isfinite(output).all(), "Dropout should not produce non-finite values"
@@ -88,12 +88,12 @@ def test_zero_dropout_equivalence():
     # Get output in eval mode
     model.eval()
     with torch.no_grad():
-        eval_output = model(x)
+        eval_output = model(x).output
 
     # Get output in train mode
     model.train()
     with torch.no_grad():
-        train_output = model(x)
+        train_output = model(x).output
 
     # Should be identical when dropout=0
     assert torch.allclose(

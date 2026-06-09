@@ -46,6 +46,7 @@ def test_language_modeling_training(tmp_path):
             "n_layers": 1,
             "d_ff": 32,
             "dropout": 0.0,
+            "output_mode": "vocab",
         },
     )
     tokenizer = DummyTokenizer(vocab_size=100)

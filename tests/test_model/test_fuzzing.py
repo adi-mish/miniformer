@@ -14,7 +14,7 @@ def test_encoder_shapes_fuzz(batch, seq, vocab):
     model = Transformer(config)
 
     x = torch.randint(0, vocab, (batch, seq))
-    output = model(x)
+    output = model(x).output
 
     assert output.shape == (batch, seq, config.d_model)
     assert torch.isfinite(output).all()
@@ -24,11 +24,18 @@ def test_encoder_shapes_fuzz(batch, seq, vocab):
 @settings(max_examples=20, deadline=5000)
 def test_feature_input_shapes_fuzz(batch, seq, features):
     """Property-based test for feature input handling."""
-    config = TransformerConfig(input_dim=features, d_model=32, n_heads=4, n_layers=2, output_dim=1)
+    config = TransformerConfig(
+        input_dim=features,
+        d_model=32,
+        n_heads=4,
+        n_layers=2,
+        output_mode="projection",
+        output_dim=1,
+    )
     model = Transformer(config)
 
     x = torch.randn(batch, seq, features)
-    output = model(x)
+    output = model(x).output
 
     assert output.shape == (batch, seq, 1)
     assert torch.isfinite(output).all()
@@ -51,7 +58,7 @@ def test_attention_dimension_compatibility_fuzz(d_model, n_heads):
     model = Transformer(config)
 
     x = torch.randint(0, 50, (2, 8))
-    output = model(x)
+    output = model(x).output
 
     assert output.shape == (2, 8, d_model)
     assert torch.isfinite(output).all()
@@ -67,7 +74,7 @@ def test_sequence_length_within_config_limit_fuzz(max_seq_len):
     model = Transformer(config)
     x = torch.randint(0, 100, (1, max_seq_len))
 
-    output = model(x)
+    output = model(x).output
 
     assert output.shape == (1, max_seq_len, 32)
     assert torch.isfinite(output).all()
@@ -95,7 +102,7 @@ def test_edge_case_single_token():
 
     # Single token input
     x = torch.randint(0, 100, (1, 1))
-    output = model(x)
+    output = model(x).output
 
     assert output.shape == (1, 1, 32)
     assert torch.isfinite(output).all()
@@ -108,7 +115,7 @@ def test_edge_case_large_batch():
 
     # Large batch
     x = torch.randint(0, 100, (32, 10))
-    output = model(x)
+    output = model(x).output
 
     assert output.shape == (32, 10, 32)
     assert torch.isfinite(output).all()
@@ -116,7 +123,14 @@ def test_edge_case_large_batch():
 
 def test_numerical_stability_extreme_values():
     """Test model stability with extreme input values."""
-    config = TransformerConfig(input_dim=4, d_model=32, n_heads=4, n_layers=2, output_dim=1)
+    config = TransformerConfig(
+        input_dim=4,
+        d_model=32,
+        n_heads=4,
+        n_layers=2,
+        output_mode="projection",
+        output_dim=1,
+    )
     model = Transformer(config)
     model.eval()
 
@@ -130,7 +144,7 @@ def test_numerical_stability_extreme_values():
 
     for x in test_cases:
         with torch.no_grad():
-            output = model(x)
+            output = model(x).output
             assert torch.isfinite(
                 output
             ).all(), f"Non-finite output for input with mean {x.mean():.2f}"

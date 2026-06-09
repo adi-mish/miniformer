@@ -10,7 +10,7 @@ def test_mini_training_loop_convergence():
         d_model=32,
         n_heads=4,
         n_layers=2,
-        output_dim=20,
+        output_mode="vocab",
         dropout=0.0,  # Disable dropout for consistent training
     )
     model = Transformer(config)
@@ -28,7 +28,7 @@ def test_mini_training_loop_convergence():
     for step in range(100):  # Enough steps to see convergence
         optimizer.zero_grad()
 
-        logits = model(x)  # [batch, seq, vocab_size]
+        logits = model(x).output  # [batch, seq, vocab_size]
         loss = loss_fn(logits.view(-1, 20), y.view(-1))
 
         loss.backward()
@@ -59,7 +59,7 @@ def test_gradient_accumulation_equivalence():
         d_model=32,
         n_heads=4,
         n_layers=2,
-        output_dim=50,
+        output_mode="vocab",
         dropout=0.0,
     )
 
@@ -81,7 +81,7 @@ def test_gradient_accumulation_equivalence():
     optimizer1 = torch.optim.SGD(model1.parameters(), lr=0.1)
 
     optimizer1.zero_grad()
-    logits1 = model1(x)
+    logits1 = model1(x).output
     loss1 = loss_fn(logits1.view(-1, 50), y.view(-1))
     loss1.backward()
     optimizer1.step()
@@ -93,12 +93,12 @@ def test_gradient_accumulation_equivalence():
     optimizer2.zero_grad()
 
     # First half
-    logits2a = model2(x[:4])
+    logits2a = model2(x[:4]).output
     loss2a = loss_fn(logits2a.view(-1, 50), y[:4].view(-1))
     (loss2a / 2).backward()  # Scale by accumulation steps
 
     # Second half
-    logits2b = model2(x[4:])
+    logits2b = model2(x[4:]).output
     loss2b = loss_fn(logits2b.view(-1, 50), y[4:].view(-1))
     (loss2b / 2).backward()  # Scale by accumulation steps
 
@@ -113,7 +113,9 @@ def test_gradient_accumulation_equivalence():
 
 def test_learning_rate_sensitivity():
     """Test that model is sensitive to learning rate changes."""
-    config = TransformerConfig(vocab_size=30, d_model=32, n_heads=4, n_layers=1, output_dim=30)
+    config = TransformerConfig(
+        vocab_size=30, d_model=32, n_heads=4, n_layers=1, output_mode="vocab"
+    )
 
     # Test with different learning rates
     learning_rates = [0.001, 0.01, 0.1]
@@ -135,7 +137,7 @@ def test_learning_rate_sensitivity():
         # Train for a few steps
         for _ in range(20):
             optimizer.zero_grad()
-            logits = model(x)
+            logits = model(x).output
             loss = loss_fn(logits.view(-1, 30), y.view(-1))
             loss.backward()
             optimizer.step()
@@ -172,14 +174,14 @@ def test_weight_decay_effect():
     for _ in range(50):
         # No decay model
         optimizer_no_decay.zero_grad()
-        output_no_decay = model_no_decay(x)
+        output_no_decay = model_no_decay(x).output
         loss_no_decay = output_no_decay.sum()
         loss_no_decay.backward()
         optimizer_no_decay.step()
 
         # With decay model
         optimizer_with_decay.zero_grad()
-        output_with_decay = model_with_decay(x)
+        output_with_decay = model_with_decay(x).output
         loss_with_decay = output_with_decay.sum()
         loss_with_decay.backward()
         optimizer_with_decay.step()

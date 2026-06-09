@@ -22,7 +22,7 @@ def main() -> None:
     input_ids = torch.randint(1, 1000, (batch_size, seq_length))
 
     # Forward pass
-    outputs = model(input_ids)
+    outputs = model(input_ids).output
     print(f"Input shape: {input_ids.shape}")
     print(f"Output shape: {outputs.shape}")
 

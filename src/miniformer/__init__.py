@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 __all__ = [
     "Transformer",
     "Seq2SeqTransformer",
+    "TransformerModelOutput",
     "Seq2SeqModelOutput",
     "TransformerConfig",
     "TransformerTrace",
@@ -21,7 +22,8 @@ __version__ = "0.1.0"
 if TYPE_CHECKING:
     from miniformer.config.model_config import TransformerConfig
     from miniformer.inspect import TransformerTrace, capture_transformer_trace
-    from miniformer.model.seq2seq_transformer import Seq2SeqModelOutput, Seq2SeqTransformer
+    from miniformer.model.outputs import Seq2SeqModelOutput, TransformerModelOutput
+    from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
     from miniformer.model.transformer import Transformer
     from miniformer.utils.logging import get_logger, setup_logging
 
@@ -43,10 +45,15 @@ def __getattr__(name: str):
         globals()[name] = Seq2SeqTransformer
         return Seq2SeqTransformer
     if name == "Seq2SeqModelOutput":
-        from miniformer.model.seq2seq_transformer import Seq2SeqModelOutput
+        from miniformer.model.outputs import Seq2SeqModelOutput
 
         globals()[name] = Seq2SeqModelOutput
         return Seq2SeqModelOutput
+    if name == "TransformerModelOutput":
+        from miniformer.model.outputs import TransformerModelOutput
+
+        globals()[name] = TransformerModelOutput
+        return TransformerModelOutput
     if name in {"TransformerTrace", "capture_transformer_trace"}:
         from miniformer.inspect import TransformerTrace, capture_transformer_trace
 

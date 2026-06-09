@@ -41,6 +41,7 @@ def make_cfg(tmp_path, data, max_epochs=1):
             "n_layers": 1,
             "d_ff": 32,
             "dropout": 0.0,
+            "output_mode": "projection",
             "output_dim": 3,
         },
     )

@@ -121,7 +121,7 @@ uv run python -m miniformer.train.trainer \
   --val_path data/val.jsonl \
   --task language_modeling \
   --model seq2seq \
-  --model_config '{"vocab_size":50257,"d_model":384,"n_heads":6,"n_layers":6,"activation":"swiglu"}' \
+  --model_config '{"vocab_size":50257,"d_model":384,"n_heads":6,"n_layers":6,"activation":"swiglu","output_mode":"vocab"}' \
   --batch_size 16 \
   --max_epochs 5 \
   --lr 5e-4 \
@@ -141,14 +141,14 @@ uv run python -m miniformer.train.trainer \
   --val_path data/classification_val.jsonl \
   --task classification \
   --model encoder \
-  --model_config '{"vocab_size":30000,"d_model":256,"n_heads":8,"n_layers":4,"output_dim":10}' \
+  --model_config '{"vocab_size":30000,"d_model":256,"n_heads":8,"n_layers":4,"output_mode":"projection","output_dim":10}' \
   --batch_size 32 \
   --max_epochs 10 \
   --lr 3e-4 \
   --scheduler onecycle
 ```
 
-The trainer currently supports `task=language_modeling` with `model=seq2seq`, and `task=classification` or `task=regression` with `model=encoder`. Classification and regression require `model_config.output_dim`; language modeling fills it from `vocab_size` when omitted.
+The trainer currently supports `task=language_modeling` with `model=seq2seq`, and `task=classification` or `task=regression` with `model=encoder`. Language modeling requires `model_config.output_mode="vocab"`. Classification and regression require `model_config.output_mode="projection"` plus `model_config.output_dim`.
 
 ### Python API
 
@@ -170,6 +170,7 @@ config = TransformerConfig(
     d_ff=1024,
     dropout=0.1,
     activation="gelu",
+    output_mode="projection",
     output_dim=10,  # Number of classes
     max_seq_len=512,
     causal=False,  # Bidirectional attention for classification/regression
@@ -179,10 +180,12 @@ model = Transformer(config)
 
 # Basic forward pass
 input_ids = torch.randint(0, 10000, (2, 128))
-outputs = model(input_ids)  # Shape: [2, 128, 10]
+outputs = model(input_ids)
+projection = outputs.projection
+assert projection is not None
 
 # For classification, use the first token
-cls_output = outputs[:, 0, :]  # Shape: [2, 10]
+cls_output = projection[:, 0, :]  # Shape: [2, 10]
 ```
 
 **Using the seq2seq model:**
@@ -198,7 +201,7 @@ config = TransformerConfig(
     d_ff=2048,
     dropout=0.1,
     activation="swiglu",
-    output_dim=32000,
+    output_mode="vocab",
     max_seq_len=1024
 )
 
@@ -221,11 +224,12 @@ generated = model.generate(
 )
 ```
 
-`Seq2SeqTransformer.forward` returns a `Seq2SeqModelOutput` dataclass. Use `output.logits`
-when `output_dim` is set, `output.hidden_states` when `output_dim=None`, and
-`output.output` when code can accept either tensor. The object still supports tuple unpacking
-as `(output_tensor, self_attentions, cross_attentions)`, but direct tensor operations should
-use an explicit field.
+`Transformer.forward` returns a `TransformerModelOutput` dataclass and
+`Seq2SeqTransformer.forward` returns a `Seq2SeqModelOutput` dataclass. Use
+`output.hidden_states` for `output_mode="hidden"`, `output.logits` for
+`output_mode="vocab"`, and `output.projection` for `output_mode="projection"`.
+`output.output` returns whichever tensor is active when generic code can accept any
+of the three modes.
 
 ---
 
@@ -239,7 +243,15 @@ from miniformer.config.model_config import TransformerConfig
 from miniformer.model.transformer import Transformer
 from miniformer.inspect import capture_transformer_trace, plot_trace_summary
 
-model = Transformer(TransformerConfig(vocab_size=1000, d_model=64, n_heads=4, n_layers=2))
+model = Transformer(
+    TransformerConfig(
+        vocab_size=1000,
+        d_model=64,
+        n_heads=4,
+        n_layers=2,
+        output_mode="vocab",
+    )
+)
 input_ids = torch.randint(1, 1000, (2, 16))
 
 trace = capture_transformer_trace(model, input_ids, top_k=5, compare_cache=True)
@@ -300,7 +312,7 @@ Both models share the same underlying components but wire them together differen
 
 The `MultiHeadAttention` class handles the core attention mechanism:
 
-- **Rotary Position Embeddings (RoPE)**: Enable with `rotary_pct` in the config (0.0 = disabled, 1.0 = full RoPE).
+- **Rotary Position Embeddings (RoPE)**: Enable with `position_mode="rope"` or `position_mode="learned+rope"` and set `rotary_pct > 0`.
 - **KV-caching**: The decoder caches key-value pairs across generation steps.
 - **SDPA integration**: PyTorch scaled dot-product attention can be enabled with `use_sdpa=True` in `TransformerConfig`.
 - **Mask semantics**: Attention masks are boolean tensors where `True` means visible.
@@ -312,6 +324,10 @@ The `MultiHeadAttention` class handles the core attention mechanism:
 Two model-level mechanisms are wired in:
 - **Learned embeddings**: Standard trainable position embeddings in the encoder and decoder
 - **Rotary (RoPE)**: Optional position-dependent rotations applied to queries and keys
+
+`position_mode="learned"` uses learned embeddings only and requires `rotary_pct=0`.
+`position_mode="rope"` uses RoPE only, and `position_mode="learned+rope"` combines
+learned positions with RoPE.
 
 The fixed sinusoidal `PositionalEncoding` module is available as a standalone building block, but the main model classes use learned embeddings plus optional RoPE.
 
@@ -341,6 +357,7 @@ config = TransformerConfig(
     d_ff=3072,               # Feed-forward dimension (typically 4x d_model)
     dropout=0.1,             # Dropout rate
     activation="swiglu",     # "gelu", "relu", or "swiglu"
+    output_mode="projection",# "hidden", "vocab", or "projection"
     max_seq_len=2048,        # Maximum sequence length
     output_dim=10,           # Required for classification/regression heads
     causal=False             # Set True for autoregressive token modeling

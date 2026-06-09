@@ -1,5 +1,6 @@
 import torch
 
+from miniformer.model.outputs import TransformerModelOutput
 from miniformer.model.transformer import Transformer, TransformerConfig
 
 
@@ -14,7 +15,7 @@ def test_kv_cache_equivalence():
 
     with torch.no_grad():
         # Non-cached forward pass
-        output_no_cache = model(input_ids, use_cache=False)
+        output_no_cache = model(input_ids, use_cache=False).output
 
         # Cached generation (simulate autoregressive generation)
         past_key_values = None
@@ -22,10 +23,9 @@ def test_kv_cache_equivalence():
 
         for i in range(input_ids.size(1)):
             current_token = input_ids[:, i : i + 1]
-            output, past_key_values = model(
-                current_token, past_key_values=past_key_values, use_cache=True
-            )
-            cached_outputs.append(output)
+            output = model(current_token, past_key_values=past_key_values, use_cache=True)
+            past_key_values = output.past_key_values
+            cached_outputs.append(output.output)
 
         # Concatenate cached outputs
         output_cached = torch.cat(cached_outputs, dim=1)
@@ -36,7 +36,9 @@ def test_kv_cache_equivalence():
 
 def test_generation_with_max_new_tokens():
     """Test autoregressive generation with max_new_tokens limit."""
-    config = TransformerConfig(vocab_size=100, d_model=32, n_heads=4, n_layers=2)
+    config = TransformerConfig(
+        vocab_size=100, d_model=32, n_heads=4, n_layers=2, output_mode="vocab"
+    )
     model = Transformer(config)
     model.eval()
 
@@ -47,7 +49,7 @@ def test_generation_with_max_new_tokens():
         # Manual autoregressive generation
         generated = input_ids.clone()
         for _ in range(max_new_tokens):
-            logits = model(generated)
+            logits = model(generated).output
             next_token = torch.argmax(logits[:, -1, :], dim=-1, keepdim=True)
             generated = torch.cat([generated, next_token], dim=1)
 
@@ -59,7 +61,9 @@ def test_generation_with_max_new_tokens():
 
 def test_generation_with_eos_token():
     """Test that generation stops at EOS token."""
-    config = TransformerConfig(vocab_size=100, d_model=32, n_heads=4, n_layers=2)
+    config = TransformerConfig(
+        vocab_size=100, d_model=32, n_heads=4, n_layers=2, output_mode="vocab"
+    )
     # Define EOS token ID separately since it's not part of config
     eos_token_id = 99
     model = Transformer(config)
@@ -70,7 +74,7 @@ def test_generation_with_eos_token():
         # Create logits that heavily favor EOS token
         logits = torch.full((batch_size, seq_len, config.vocab_size), -10.0)
         logits[:, :, eos_token_id] = 10.0  # High probability for EOS
-        return logits
+        return TransformerModelOutput(logits=logits)
 
     model.forward = mock_forward
     model.eval()
@@ -82,7 +86,7 @@ def test_generation_with_eos_token():
         generated = input_ids.clone()
         max_new_tokens = 10
         for _ in range(max_new_tokens):
-            logits = model(generated)
+            logits = model(generated).output
             next_token = torch.argmax(logits[:, -1, :], dim=-1, keepdim=True)
             generated = torch.cat([generated, next_token], dim=1)
             if next_token.item() == eos_token_id:

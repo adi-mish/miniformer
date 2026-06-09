@@ -17,7 +17,7 @@ def test_save_load_round_trip():
 
     model.eval()
     with torch.no_grad():
-        original_output = model(x)
+        original_output = model(x).output
 
     # Save to temporary directory
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -28,7 +28,7 @@ def test_save_load_round_trip():
         loaded_model.eval()
 
         with torch.no_grad():
-            loaded_output = loaded_model(x)
+            loaded_output = loaded_model(x).output
 
         # Outputs should be identical
         assert torch.allclose(original_output, loaded_output, atol=1e-6)
@@ -99,14 +99,14 @@ def test_cuda_device_transfer():
     x_cpu = torch.randint(0, 100, (2, 10))
     model.eval()
     with torch.no_grad():
-        output_cpu = model(x_cpu)
+        output_cpu = model(x_cpu).output
 
     # Move to CUDA
     model = model.cuda()
     x_cuda = x_cpu.cuda()
 
     with torch.no_grad():
-        output_cuda = model(x_cuda)
+        output_cuda = model(x_cuda).output
 
     # Results should be equivalent (allowing for small numerical differences)
     assert torch.allclose(output_cpu, output_cuda.cpu(), atol=1e-5)
@@ -125,14 +125,14 @@ def test_mps_device_transfer():
     x_cpu = torch.randint(0, 100, (2, 10))
     model.eval()
     with torch.no_grad():
-        output_cpu = model(x_cpu)
+        output_cpu = model(x_cpu).output
 
     # Move to MPS
     model = model.to("mps")
     x_mps = x_cpu.to("mps")
 
     with torch.no_grad():
-        output_mps = model(x_mps)
+        output_mps = model(x_mps).output
 
     # Results should be equivalent (allowing for small numerical differences)
     assert torch.allclose(output_cpu, output_mps.cpu(), atol=1e-5)

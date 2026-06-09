@@ -17,6 +17,7 @@ def make_cfg(
         "n_layers": 1,
         "d_ff": 16,
         "dropout": 0.0,
+        "output_mode": "vocab" if task == "language_modeling" else "projection",
     }
     if output_dim is not None:
         model_config["output_dim"] = output_dim

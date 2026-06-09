@@ -203,15 +203,12 @@ def _is_logit_like(model: torch.nn.Module, output: torch.Tensor) -> bool:
     config = getattr(model, "config", None)
     if config is None:
         return True
-    last_dim = output.size(-1)
-    output_dim = getattr(config, "output_dim", None)
-    vocab_size = getattr(config, "vocab_size", None)
-    d_model = getattr(config, "d_model", None)
-    if output_dim is not None:
-        return last_dim == output_dim
-    if vocab_size is not None and last_dim == vocab_size:
+    output_mode = getattr(config, "output_mode", None)
+    if output_mode in {"vocab", "projection"}:
         return True
-    return d_model is None or last_dim != d_model
+    if output_mode == "hidden":
+        return False
+    return False
 
 
 def _logit_trace(output: torch.Tensor, top_k: int) -> Optional[LogitTrace]:
@@ -279,12 +276,13 @@ def _compare_encoder_cache(
     cached_outputs: list[torch.Tensor] = []
     for index in range(input_ids.size(1)):
         current = input_ids[:, index : index + 1]
-        output, past_key_values = model(
+        output = model(
             current,
             past_key_values=past_key_values,
             use_cache=True,
         )
-        cached_outputs.append(output)
+        cached_outputs.append(output.output)
+        past_key_values = output.past_key_values
 
     cached = torch.cat(cached_outputs, dim=1)
     diff = (full_tensor - cached).abs().max()

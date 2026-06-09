@@ -39,6 +39,7 @@ def test_classification_training(tmp_path):
             "n_layers": 1,
             "d_ff": 32,
             "dropout": 0.0,
+            "output_mode": "projection",
             "output_dim": 3,
         },
     )

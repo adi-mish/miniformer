@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, Literal, Optional, Union
 
 
 @dataclass
@@ -22,6 +22,8 @@ class TransformerConfig:
     use_sdpa: bool = False
     causal: bool = True  # Token Transformer defaults to autoregressive self-attention
     rotary_pct: float = 0.0  # 0 = disabled, 1 = full head dimension
+    output_mode: Literal["hidden", "vocab", "projection"] = "hidden"
+    position_mode: Literal["learned", "rope", "learned+rope"] = "learned"
 
     # Input/Output dimensions
     input_dim: Optional[int] = None  # If provided, model accepts feature vectors directly
@@ -63,17 +65,27 @@ class TransformerConfig:
         if self.activation not in valid_activations:
             raise ValueError(f"Unknown activation: {self.activation}")
 
-        if (
-            self.input_dim is not None
-            and self.input_dim != self.d_model
-            and self.output_dim is None
-        ):
-            raise ValueError(
-                "input_dim differs from d_model – please set output_dim explicitly "
-                "or keep input_dim == d_model."
-            )
+        valid_output_modes = {"hidden", "vocab", "projection"}
+        if self.output_mode not in valid_output_modes:
+            raise ValueError(f"Unknown output_mode: {self.output_mode}")
+        if self.output_mode == "hidden" and self.output_dim is not None:
+            raise ValueError("output_mode='hidden' requires output_dim=None")
+        if self.output_mode == "vocab":
+            if self.input_dim is not None:
+                raise ValueError("output_mode='vocab' is only valid for token inputs")
+            if self.output_dim is not None:
+                raise ValueError("output_mode='vocab' requires output_dim=None")
+        if self.output_mode == "projection" and self.output_dim is None:
+            raise ValueError("output_mode='projection' requires output_dim")
 
-        # (Removed the default-output_dim and strict input_dim==d_model checks)
+        valid_position_modes = {"learned", "rope", "learned+rope"}
+        if self.position_mode not in valid_position_modes:
+            raise ValueError(f"Unknown position_mode: {self.position_mode}")
+
+        if self.position_mode == "learned" and self.rotary_pct != 0:
+            raise ValueError("position_mode='learned' requires rotary_pct=0")
+        if self.position_mode in {"rope", "learned+rope"} and self.rotary_pct <= 0:
+            raise ValueError(f"position_mode='{self.position_mode}' requires rotary_pct > 0")
 
     @classmethod
     def from_dict(cls, config_dict: Dict) -> "TransformerConfig":

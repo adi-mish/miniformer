@@ -6,20 +6,20 @@ arbitrary feature vectors (e.g. audio, vision, time-series)."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
 import torch
 import torch.nn as nn
 
 from miniformer.config.model_config import TransformerConfig
-from miniformer.model.decoder import AttentionList, Decoder, DecoderPastKeyValues
+from miniformer.model.decoder import Decoder, DecoderPastKeyValues
 from miniformer.model.encoder import Encoder  # existing encoder stack
 from miniformer.model.masks import (
     causal_mask,
     combine_masks,
     padding_mask,
 )
+from miniformer.model.outputs import Seq2SeqModelOutput
 
 if TYPE_CHECKING:
     from miniformer.inspect import TransformerTrace
@@ -27,53 +27,7 @@ if TYPE_CHECKING:
 __all__ = [
     "Seq2SeqModelOutput",
     "Seq2SeqTransformer",
-    "create_padding_mask",
-    "create_causal_mask",
 ]
-
-
-@dataclass(frozen=True)
-class Seq2SeqModelOutput:
-    """Explicit encoder-decoder model output."""
-
-    logits: Optional[torch.Tensor]
-    hidden_states: Optional[torch.Tensor]
-    self_attentions: AttentionList
-    cross_attentions: AttentionList
-
-    @property
-    def output(self) -> torch.Tensor:
-        """Return logits when present, otherwise the decoder hidden states."""
-        if self.logits is not None:
-            return self.logits
-        if self.hidden_states is not None:
-            return self.hidden_states
-        raise RuntimeError("Seq2SeqModelOutput has neither logits nor hidden states")
-
-    def __iter__(self):
-        """Preserve tuple-unpacking compatibility: output, self_attns, cross_attns."""
-        yield self.output
-        yield self.self_attentions
-        yield self.cross_attentions
-
-    def __getitem__(self, index: int):
-        if index == 0:
-            return self.output
-        if index == 1:
-            return self.self_attentions
-        if index == 2:
-            return self.cross_attentions
-        raise IndexError(index)
-
-
-def create_padding_mask(seq: torch.Tensor, pad_id: int = 0) -> torch.Tensor:
-    """Backward-compatible wrapper for :func:`miniformer.model.masks.padding_mask`."""
-    return padding_mask(seq, pad_id=pad_id)
-
-
-def create_causal_mask(seq_len: int, device: torch.device) -> torch.Tensor:
-    """Backward-compatible wrapper for a standard autoregressive causal mask."""
-    return causal_mask(seq_len, device=device)
 
 
 class Seq2SeqTransformer(nn.Module):
@@ -95,14 +49,6 @@ class Seq2SeqTransformer(nn.Module):
         # --- sub-modules ----------------------------------------------------
         self.encoder = Encoder(config)
         self.decoder = Decoder(config)
-
-        # ── decoder head policy ─────────────────────────────────────────
-        # Use the same target_dim logic as Transformer for consistency
-        if config.output_dim is None:
-            # tests want raw hidden states when no explicit output_dim
-            self.decoder.output_projection = nn.Identity()
-        else:
-            self.decoder.output_projection = nn.Linear(config.d_model, config.output_dim)
 
         # optionally tie token embeddings
         if (
@@ -140,7 +86,7 @@ class Seq2SeqTransformer(nn.Module):
         memory_mask: Optional[torch.Tensor] = None,
         use_causal_mask: bool = True,
     ) -> Seq2SeqModelOutput:
-        """Return projected logits when ``output_dim`` is set, otherwise decoder hidden states."""
+        """Run encoder-decoder forward pass and return the configured output mode."""
         # ── build masks ─────────────────────────────────────────────────
         if src_mask is None:
             src_mask = padding_mask(src)
@@ -157,20 +103,19 @@ class Seq2SeqTransformer(nn.Module):
         memory = self.encoder(src_proj, src_mask)
 
         # ── decode ─────────────────────────────────────────────────────
-        need_hidden = isinstance(self.decoder.output_projection, nn.Identity)
         decoder_output = self.decoder(
             tgt,
             memory,
             tgt_mask,
             memory_mask,
             use_causal_mask=False,
-            return_hidden=need_hidden,
         )
 
         dec_out = decoder_output.output
         return Seq2SeqModelOutput(
-            logits=None if need_hidden else dec_out,
-            hidden_states=dec_out if need_hidden else None,
+            logits=dec_out if self.config.output_mode == "vocab" else None,
+            hidden_states=dec_out if self.config.output_mode == "hidden" else None,
+            projection=dec_out if self.config.output_mode == "projection" else None,
             self_attentions=decoder_output.self_attentions,
             cross_attentions=decoder_output.cross_attentions,
         )
@@ -215,6 +160,8 @@ class Seq2SeqTransformer(nn.Module):
     ) -> torch.Tensor:
         if self.decoder.token_embedding is None:
             raise RuntimeError("generate() is only available in token‑based mode.")
+        if self.config.output_mode != "vocab":
+            raise RuntimeError("generate() requires output_mode='vocab'")
         if temperature <= 0:
             raise ValueError("temperature must be positive")
 
@@ -251,19 +198,7 @@ class Seq2SeqTransformer(nn.Module):
                 )
                 dec_out = decoder_output.output
 
-            # Get logits for the next token. If normal forward() is configured
-            # to return hidden states, reuse the token embedding as a vocab head
-            # for generation instead of sampling over d_model.
-            step_out = dec_out[:, -1, :]
-            if step_out.size(-1) == self.config.d_model:
-                logits = torch.matmul(step_out, self.decoder.token_embedding.weight.t())
-            else:
-                logits = step_out
-            if logits.size(-1) != self.config.vocab_size:
-                raise RuntimeError(
-                    "generate() requires decoder outputs over the token vocabulary; "
-                    "set output_dim to vocab_size or leave it unset."
-                )
+            logits = dec_out[:, -1, :]
             logits = logits / temperature
 
             # Apply top-k and top-p filtering

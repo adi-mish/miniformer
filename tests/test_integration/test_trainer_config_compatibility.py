@@ -15,6 +15,7 @@ def make_cfg():
         "n_layers": 1,
         "d_ff": 32,
         "dropout": 0.0,
+        "output_mode": "projection",
         "output_dim": 3,
     }
     cfg.lr = 0.01

@@ -46,6 +46,8 @@ def main():
     # Override configuration with command line arguments
     config.batch_size = args.batch_size
     config.learning_rate = args.lr
+    config.output_mode = "vocab"
+    config.output_dim = None
 
     # Create a dummy dataset for demonstration
     class DummyDataset(torch.utils.data.Dataset):
@@ -71,7 +73,6 @@ def main():
     )
 
     # Create model
-    config.output_dim = config.vocab_size
     model = Transformer(config)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
     loss_fn = torch.nn.CrossEntropyLoss()
@@ -81,7 +82,7 @@ def main():
         total_loss = 0.0
         for input_ids, labels in train_loader:
             optimizer.zero_grad()
-            logits = model(input_ids)
+            logits = model(input_ids).output
             loss = loss_fn(logits.reshape(-1, logits.size(-1)), labels.reshape(-1))
             loss.backward()
             optimizer.step()

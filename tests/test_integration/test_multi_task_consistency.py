@@ -28,9 +28,13 @@ class TestMultiTaskConsistency:
             model_config = base_config.copy()
 
             if task == "classification":
+                model_config["output_mode"] = "projection"
                 model_config["output_dim"] = 3  # 3 classes
             elif task == "regression":
+                model_config["output_mode"] = "projection"
                 model_config["output_dim"] = 1  # Single output value
+            elif task == "language_modeling":
+                model_config["output_mode"] = "vocab"
 
             # Create a TrainConfig for the task
             cfg = TrainConfig()
@@ -55,6 +59,7 @@ class TestMultiTaskConsistency:
         reg_cfg.task = "regression"
         reg_cfg.model = "encoder"
         reg_cfg.model_config = base_config.copy()
+        reg_cfg.model_config["output_mode"] = "projection"
         reg_cfg.model_config["output_dim"] = 1  # Regression output
 
         reg_model = MiniFormerModule(reg_cfg)
@@ -91,10 +96,10 @@ class TestMultiTaskConsistency:
             if hasattr(models["classification"].model, "token_embedding"):
                 # Token-based input
                 batch = torch.randint(0, 100, (2, 5))
-                clf_out = models["classification"].model(batch)
+                clf_out = models["classification"].model(batch).output
                 assert clf_out.shape[-1] == 3, "Wrong classification output dimension"
 
-                reg_out = models["regression"].model(batch)
+                reg_out = models["regression"].model(batch).output
                 assert reg_out.shape[-1] == 1, "Wrong regression output dimension"
 
             # For language modeling with seq2seq

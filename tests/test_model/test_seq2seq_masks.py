@@ -107,7 +107,8 @@ def test_decoder_cache_matches_full_pass_for_chunked_targets():
         n_layers=2,
         d_ff=64,
         dropout=0.0,
-        output_dim=64,
+        output_mode="vocab",
+        position_mode="learned+rope",
         rotary_pct=0.5,
     )
     model = Seq2SeqTransformer(config).eval()
@@ -151,10 +152,11 @@ def test_seq2seq_generate_rejects_non_vocab_output_head():
         n_heads=2,
         n_layers=1,
         d_ff=32,
+        output_mode="projection",
         output_dim=4,
     )
     model = Seq2SeqTransformer(config).eval()
     src = torch.randint(1, config.vocab_size, (1, 3))
 
-    with pytest.raises(RuntimeError, match="requires decoder outputs over the token vocabulary"):
+    with pytest.raises(RuntimeError, match="requires output_mode='vocab'"):
         model.generate(src, max_new_tokens=1)

@@ -20,19 +20,19 @@ def test_capture_transformer_trace_encoder():
             n_layers=2,
             d_ff=32,
             dropout=0.0,
-            output_dim=30,
+            output_mode="vocab",
         )
     )
     input_ids = torch.randint(1, 30, (2, 5))
 
     model.train()
     with torch.no_grad():
-        expected = model(input_ids)
+        expected = model(input_ids).output
 
     trace = model.trace(input_ids, top_k=3, compare_cache=True)
 
     with torch.no_grad():
-        actual = model(input_ids)
+        actual = model(input_ids).output
 
     assert trace.output_shape == (2, 5, 30)
     assert [layer.name for layer in trace.layers] == ["encoder.layers.0", "encoder.layers.1"]
@@ -63,7 +63,7 @@ def test_capture_transformer_trace_json_round_trip(tmp_path):
             n_layers=1,
             d_ff=32,
             dropout=0.0,
-            output_dim=30,
+            output_mode="vocab",
         )
     )
     input_ids = torch.randint(1, 30, (1, 4))
@@ -88,7 +88,7 @@ def test_capture_transformer_trace_seq2seq_and_plot():
             n_layers=1,
             d_ff=32,
             dropout=0.0,
-            output_dim=30,
+            output_mode="vocab",
         )
     )
     src = torch.randint(1, 30, (2, 4))
@@ -118,7 +118,7 @@ def test_trace_reports_unavailable_sdpa_attention():
             n_layers=1,
             d_ff=32,
             dropout=0.0,
-            output_dim=30,
+            output_mode="vocab",
             use_sdpa=True,
         )
     )

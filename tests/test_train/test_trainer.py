@@ -97,6 +97,7 @@ def test_train_model_smoke(tmp_path):
             "n_layers": 1,
             "d_ff": 16,
             "dropout": 0.0,
+            "output_mode": "projection",
             "output_dim": 2,
         },
         work_dir=str(tmp_path),

@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 
 from miniformer.model.transformer import Transformer, TransformerConfig
 
@@ -10,19 +11,19 @@ def test_shared_embeddings_weight_tying():
         d_model=32,
         n_heads=4,
         n_layers=2,
-        output_dim=100,  # Same as vocab_size for proper weight sharing
+        output_mode="vocab",
     )
     model = Transformer(config)
 
-    # Check if input and output embeddings share weights
-    if hasattr(model, "token_embedding") and hasattr(model, "output_projection"):
-        input_embedding = model.token_embedding
-        output_projection = model.output_projection
+    assert model.token_embedding is not None
+    assert isinstance(model.output_projection, nn.Identity)
+    assert model._tied_weights is True
 
-        # They should be the same tensor object (not just equal values)
-        assert (
-            input_embedding is output_projection
-        ), "Shared embeddings should use the same memory location"
+    x = torch.randint(0, config.vocab_size, (2, 4))
+    logits = model(x).output
+    loss = logits.sum()
+    loss.backward()
+    assert model.token_embedding.weight.grad is not None
 
 
 def test_pre_norm_vs_post_norm():
@@ -58,8 +59,8 @@ def test_pre_norm_vs_post_norm():
     model_post.eval()
 
     with torch.no_grad():
-        output_pre = model_pre(x)
-        output_post = model_post(x)
+        output_pre = model_pre(x).output
+        output_post = model_post(x).output
 
     # Outputs should have same shape
     assert output_pre.shape == output_post.shape == (2, 8, d_model)
@@ -85,7 +86,7 @@ def test_different_activation_functions():
         model.eval()
 
         with torch.no_grad():
-            outputs[activation] = model(x)
+            outputs[activation] = model(x).output
 
     # All should produce valid outputs
     for activation, output in outputs.items():
@@ -114,13 +115,14 @@ def test_rotary_embedding_implementation():
             d_model=64,  # Use 64 to ensure divisibility
             n_heads=8,
             n_layers=1,
+            position_mode="learned" if rotary_pct == 0.0 else "learned+rope",
             rotary_pct=rotary_pct,
         )
         model = Transformer(config)
         model.eval()
 
         with torch.no_grad():
-            outputs[rotary_pct] = model(x)
+            outputs[rotary_pct] = model(x).output
 
     # All should produce valid outputs
     for rotary_pct, output in outputs.items():
