@@ -6,6 +6,8 @@ from pathlib import Path
 
 import torch
 
+import miniformer.scripts as scripts
+
 
 def test_make_tiny_jsonl_script_writes_all_tasks(tmp_path):
     result = subprocess.run(
@@ -85,6 +87,13 @@ def test_check_script_lists_available_checks():
     assert result.returncode == 0, result.stderr
     assert "tests: uv run pytest -q" in result.stdout
     assert "build: uv build" in result.stdout
+
+
+def test_script_package_exports_helpers():
+    assert callable(scripts.run_checks)
+    assert callable(scripts.write_tiny_jsonl)
+    assert callable(scripts.write_trace_report)
+    assert "tests" in {name for name, _ in scripts.CHECKS}
 
 
 def test_validate_jsonl_script_reports_schema_errors(tmp_path):
