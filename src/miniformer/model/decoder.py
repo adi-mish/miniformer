@@ -206,7 +206,8 @@ class Decoder(nn.Module):
                 past_len = first_past_self[0].size(2)
         if past_len + seq_len > self.config.max_seq_len:
             raise ValueError(
-                f"Sequence length {past_len + seq_len} exceeds max_seq_len={self.config.max_seq_len}"
+                f"Sequence length {past_len + seq_len} exceeds "
+                f"max_seq_len={self.config.max_seq_len}"
             )
 
         # ── token/feature input → d_model ───────────────────────────────

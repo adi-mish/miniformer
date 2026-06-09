@@ -130,7 +130,8 @@ class Transformer(nn.Module):
                 x = x["input_ids"]
             else:
                 raise TypeError(
-                    "Input must be a tensor, a list of dicts with 'input_ids' or 'input', or a dict with 'input_ids'"
+                    "Input must be a tensor, a list of dicts with "
+                    "'input_ids' or 'input', or a dict with 'input_ids'"
                 )
 
         # ----- stitch the full sequence when caching ------------------------
@@ -164,7 +165,7 @@ class Transformer(nn.Module):
             proj_full = self.output_projection(h_full)
 
         if not use_cache:
-            return proj_full  # legacy behaviour
+            return proj_full
         else:
             # slice out the freshly generated tokens
             out_new = proj_full[:, -x.size(1) :, :].contiguous()

@@ -118,9 +118,9 @@ class MiniFormerDataModule:
             input_ids = torch.full((len(batch), max_len), 0, dtype=torch.long)
             labels = torch.full_like(input_ids, -100)
             for i, b in enumerate(batch):
-                l = lengths[i]
-                input_ids[i, :l] = b["input_ids"]
-                labels[i, :l] = b["labels"]
+                seq_len = lengths[i]
+                input_ids[i, :seq_len] = b["input_ids"]
+                labels[i, :seq_len] = b["labels"]
             return {"input_ids": input_ids, "labels": labels}
 
         # ---------------------------------------------------- 2. string inputs → return list
