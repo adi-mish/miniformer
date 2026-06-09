@@ -78,12 +78,9 @@ def test_attention_dimension_compatibility_fuzz(d_model, n_heads):
     assert torch.isfinite(output).all()
 
 
-@given(
-    seq_len=st.integers(1, 64),
-    max_seq_len=st.integers(1, 128)
-)
+@given(max_seq_len=st.integers(1, 32))
 @settings(max_examples=15, deadline=5000)
-def test_sequence_length_handling_fuzz(seq_len, max_seq_len):
+def test_sequence_length_within_config_limit_fuzz(max_seq_len):
     """Property-based test for sequence length handling."""
     config = TransformerConfig(
         vocab_size=100,
@@ -93,21 +90,27 @@ def test_sequence_length_handling_fuzz(seq_len, max_seq_len):
         max_seq_len=max_seq_len
     )
     model = Transformer(config)
-    
-    # Test with sequences up to max_seq_len
-    test_seq_len = min(seq_len, max_seq_len)
-    x = torch.randint(0, 100, (1, test_seq_len))
-    
-    try:
-        output = model(x)
-        assert output.shape == (1, test_seq_len, 32)
-        assert torch.isfinite(output).all()
-    except Exception as e:
-        # If sequence is too long, should fail gracefully
-        if seq_len > max_seq_len:
-            pytest.skip(f"Expected failure for seq_len {seq_len} > max_seq_len {max_seq_len}")
-        else:
-            raise e
+    x = torch.randint(0, 100, (1, max_seq_len))
+
+    output = model(x)
+
+    assert output.shape == (1, max_seq_len, 32)
+    assert torch.isfinite(output).all()
+
+
+def test_sequence_length_exceeding_config_limit_raises():
+    config = TransformerConfig(
+        vocab_size=100,
+        d_model=32,
+        n_heads=4,
+        n_layers=1,
+        max_seq_len=4,
+    )
+    model = Transformer(config)
+    x = torch.randint(0, 100, (1, 5))
+
+    with pytest.raises(ValueError, match="exceeds max_seq_len"):
+        model(x)
 
 
 def test_edge_case_single_token():

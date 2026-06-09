@@ -155,9 +155,18 @@ class Decoder(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
     
-    def create_causal_mask(self, seq_len: int, device: torch.device) -> torch.Tensor:
-        """Create causal (lower triangular) attention mask for autoregressive generation"""
-        return torch.tril(torch.ones(seq_len, seq_len, device=device, dtype=torch.bool))
+    def create_causal_mask(
+        self,
+        seq_len: int,
+        device: torch.device,
+        past_len: int = 0,
+    ) -> torch.Tensor:
+        """Create a cache-aware causal mask [query_len, key_len]."""
+        query_positions = torch.arange(
+            past_len, past_len + seq_len, device=device
+        ).unsqueeze(1)
+        key_positions = torch.arange(past_len + seq_len, device=device).unsqueeze(0)
+        return key_positions <= query_positions
     
     def forward(
         self,
@@ -172,7 +181,7 @@ class Decoder(nn.Module):
                        Optional[Tuple[torch.Tensor, torch.Tensor]]]]
         ] = None,
         use_cache: bool = False,
-        return_hidden: bool = False,              # ← NEW
+        return_hidden: bool = False,
     ):
         """
         Returns
@@ -181,6 +190,15 @@ class Decoder(nn.Module):
         """
         batch_size, seq_len = x.size(0), x.size(1)
         device = x.device
+        past_len = 0
+        if past_key_values is not None and len(past_key_values) > 0:
+            first_past_self = past_key_values[0][0]
+            if first_past_self is not None:
+                past_len = first_past_self[0].size(2)
+        if past_len + seq_len > self.config.max_seq_len:
+            raise ValueError(
+                f"Sequence length {past_len + seq_len} exceeds max_seq_len={self.config.max_seq_len}"
+            )
 
         # ── token/feature input → d_model ───────────────────────────────
         if self.token_embedding is not None:
@@ -193,11 +211,13 @@ class Decoder(nn.Module):
             raise RuntimeError("Decoder has no input layer")
 
         # positional encodings ------------------------------------------------
-        positions = torch.arange(seq_len, device=device).unsqueeze(0).expand(batch_size, seq_len)
+        positions = torch.arange(
+            past_len, past_len + seq_len, device=device
+        ).unsqueeze(0).expand(batch_size, seq_len)
         x = self.dropout(x + self.position_encoding(positions))
 
         if use_causal_mask and self_attn_mask is None:
-            self_attn_mask = self.create_causal_mask(seq_len, device)
+            self_attn_mask = self.create_causal_mask(seq_len, device, past_len)
 
         self_attentions, cross_attentions = [], []
         if past_key_values is None:

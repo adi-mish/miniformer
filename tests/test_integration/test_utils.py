@@ -1,9 +1,7 @@
 import os
 import json
 import torch
-import tempfile
-from types import SimpleNamespace
-from typing import List, Dict, Union, Optional, Any
+from typing import List, Dict, Any
 
 
 class DummyTokenizer:

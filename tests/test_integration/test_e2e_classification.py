@@ -18,6 +18,7 @@ def test_classification_training(tmp_path):
 
     cfg = TrainConfig(
         task="classification",
+        model="encoder",
         train_path=str(train_file),
         val_path=str(val_file),
         batch_size=3,

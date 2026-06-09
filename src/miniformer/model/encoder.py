@@ -20,7 +20,7 @@ class EncoderLayer(nn.Module):
             d_model=config.d_model,
             n_heads=config.n_heads,
             dropout=config.dropout,
-            use_sdpa=getattr(config, "use_sdpa", True),
+            use_sdpa=getattr(config, "use_sdpa", False),
             rotary_pct=getattr(config, "rotary_pct", 0.0),
         )
         self.feed_forward = FeedForward(
@@ -106,6 +106,10 @@ class Encoder(nn.Module):
 
         B, S = x.size(0), x.size(1)
         device = x.device
+        if S > self.config.max_seq_len:
+            raise ValueError(
+                f"Sequence length {S} exceeds max_seq_len={self.config.max_seq_len}"
+            )
 
         # input ↦ d_model
         if self.token_embedding is not None:

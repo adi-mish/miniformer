@@ -1,8 +1,5 @@
-import sys
-import pathlib
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent / 'src'))
-
 import json
+import sys
 import pytest
 from miniformer.train.train_config import TrainConfig
 

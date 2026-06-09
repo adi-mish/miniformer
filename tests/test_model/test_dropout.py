@@ -1,5 +1,4 @@
 import torch
-import pytest
 from miniformer.model.transformer import Transformer, TransformerConfig
 
 

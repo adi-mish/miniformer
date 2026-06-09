@@ -7,6 +7,7 @@ from miniformer.train.train_config import TrainConfig
 def make_cfg():
     cfg = TrainConfig()
     cfg.task = "classification"
+    cfg.model = "encoder"
     cfg.model_config = {
         "vocab_size": 100,
         "d_model": 16,

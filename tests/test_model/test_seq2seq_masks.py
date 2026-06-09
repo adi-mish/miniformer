@@ -1,19 +1,11 @@
 import torch
 import pytest
-from miniformer.model.transformer import Transformer, TransformerConfig
-from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
+from miniformer.model.transformer import TransformerConfig
+from miniformer.model.seq2seq_transformer import Seq2SeqTransformer, create_padding_mask
 
 
-def test_cross_attention_mask_prevents_future_leakage():
-    """Test that cross-attention masks prevent decoder from seeing future tokens."""
-    config = TransformerConfig(
-        vocab_size=100,
-        d_model=32,
-        n_heads=4,
-        n_layers=2,
-    )
-    
-    # Use encoder-decoder model for cross-attention testing
+def test_seq2seq_forward_causal_mask_prevents_future_target_leakage():
+    """The decoder must not let later target tokens affect earlier target positions."""
     model = Seq2SeqTransformer(
         vocab_size=100,
         d_model=32,
@@ -43,13 +35,6 @@ def test_cross_attention_mask_prevents_future_leakage():
 
 def test_encoder_decoder_attention_alignment():
     """Test that encoder-decoder attention properly aligns sequences."""
-    config = TransformerConfig(
-        vocab_size=100,
-        d_model=32,
-        n_heads=4,
-        n_layers=1
-    )
-    
     model = Seq2SeqTransformer(
         vocab_size=100,
         d_model=32,
@@ -76,13 +61,6 @@ def test_encoder_decoder_attention_alignment():
 
 def test_decoder_self_attention_causal_mask():
     """Test that decoder self-attention respects causal masking."""
-    config = TransformerConfig(
-        vocab_size=100,
-        d_model=32,
-        n_heads=4,
-        n_layers=2,
-        )
-    
     model = Seq2SeqTransformer(
         vocab_size=100,
         d_model=32,
@@ -118,13 +96,6 @@ def test_decoder_self_attention_causal_mask():
 
 def test_padding_mask_in_cross_attention():
     """Test that padding masks work correctly in encoder-decoder attention."""
-    config = TransformerConfig(
-        vocab_size=100,
-        d_model=32,
-        n_heads=4,
-        n_layers=1,
-    )
-    
     model = Seq2SeqTransformer(
         vocab_size=100,
         d_model=32,
@@ -150,3 +121,62 @@ def test_padding_mask_in_cross_attention():
     # Both should produce finite outputs
     assert torch.isfinite(output_padded).all()
     assert torch.isfinite(output_unpadded).all()
+
+
+def test_decoder_cache_matches_full_pass_for_chunked_targets():
+    config = TransformerConfig(
+        vocab_size=64,
+        d_model=32,
+        n_heads=4,
+        n_layers=2,
+        d_ff=64,
+        dropout=0.0,
+        output_dim=64,
+        rotary_pct=0.5,
+    )
+    model = Seq2SeqTransformer(config).eval()
+
+    src = torch.randint(1, config.vocab_size, (2, 5))
+    tgt = torch.randint(1, config.vocab_size, (2, 6))
+    src_mask = create_padding_mask(src)
+
+    with torch.no_grad():
+        memory = model.encoder(src, src_mask)
+        full_out, _, _ = model.decoder(
+            tgt,
+            memory,
+            cross_attn_mask=src_mask,
+            use_causal_mask=True,
+        )
+
+        past_key_values = None
+        cached_chunks = []
+        for start, end in [(0, 2), (2, 5), (5, 6)]:
+            chunk_out, _, _, past_key_values = model.decoder(
+                tgt[:, start:end],
+                memory,
+                cross_attn_mask=src_mask,
+                use_causal_mask=True,
+                past_key_values=past_key_values,
+                use_cache=True,
+            )
+            cached_chunks.append(chunk_out)
+
+    cached_out = torch.cat(cached_chunks, dim=1)
+    assert torch.allclose(full_out, cached_out, atol=1e-5)
+
+
+def test_seq2seq_generate_rejects_non_vocab_output_head():
+    config = TransformerConfig(
+        vocab_size=32,
+        d_model=16,
+        n_heads=2,
+        n_layers=1,
+        d_ff=32,
+        output_dim=4,
+    )
+    model = Seq2SeqTransformer(config).eval()
+    src = torch.randint(1, config.vocab_size, (1, 3))
+
+    with pytest.raises(RuntimeError, match="requires decoder outputs over the token vocabulary"):
+        model.generate(src, max_new_tokens=1)

@@ -1,6 +1,5 @@
 # Miniformer: A Lightweight Transformer Library
 
-[![PyPI version](https://badge.fury.io/py/miniformer.svg)](https://badge.fury.io/py/miniformer)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-%23EE4C2C.svg?&logo=PyTorch&logoColor=white)](https://pytorch.org/)
@@ -41,7 +40,7 @@ The library started as a learning exercise but evolved into something useful for
 
 I built this around the standard transformer architecture from "Attention Is All You Need," but kept things simple. The core components are:
 
-- **Encoder-only transformer**: Good for classification, regression, or feature extraction
+- **Encoder-only transformer**: Good for classification, regression, causal token modeling, or feature extraction
 - **Encoder-decoder (seq2seq)**: Handles translation, summarization, or generation tasks
 - **Multi-head attention** with optional rotary position embeddings (RoPE)
 - **Feed-forward networks** supporting GELU, ReLU, and SwiGLU activations
@@ -147,6 +146,8 @@ uv run python -m miniformer.train.trainer \
   --scheduler onecycle
 ```
 
+The trainer currently supports `task=language_modeling` with `model=seq2seq`, and `task=classification` or `task=regression` with `model=encoder`. Classification and regression require `model_config.output_dim`; language modeling fills it from `vocab_size` when omitted.
+
 ### Python API
 
 If you prefer code to command lines, the API is pretty clean:
@@ -168,7 +169,8 @@ config = TransformerConfig(
     dropout=0.1,
     activation="gelu",
     output_dim=10,  # Number of classes
-    max_seq_len=512
+    max_seq_len=512,
+    causal=False,  # Bidirectional attention for classification/regression
 )
 
 model = Transformer(config)
@@ -237,7 +239,7 @@ print(trace.attentions[0])
 fig, ax = plot_trace_summary(trace)
 ```
 
-`capture_transformer_trace` records per-layer activation shape, mean, standard deviation, norm, and attention entropy. For raw attention heatmaps, use `plot_attention(model.get_attention_weights(input_ids))`.
+`capture_transformer_trace` records per-layer activation shape, mean, standard deviation, norm, and attention entropy. For raw attention heatmaps, use `plot_attention(model.get_attention_weights(input_ids))`. Raw attention tensors are only available when `use_sdpa=False`; PyTorch's SDPA path does not return attention weights.
 
 ---
 
@@ -271,7 +273,7 @@ One thing to note: for language modeling, you'll need a tokenizer. The trainer t
 
 ### The Core Models
 
-**Transformer (Encoder-only)**: This is your standard encoder stack—great for classification, regression, or when you need fixed-size representations. It supports both token inputs (with embeddings) and direct feature vectors.
+**Transformer (Encoder-only)**: This is an encoder stack that supports token inputs and direct feature vectors. Token inputs default to causal masking (`causal=True`) so the same class can be used for small autoregressive models. Set `causal=False` for bidirectional classification, regression, or feature extraction.
 
 **Seq2SeqTransformer (Encoder-Decoder)**: Full sequence-to-sequence model with cross-attention. Use this for translation, summarization, or any task where input and output lengths differ.
 
@@ -287,10 +289,11 @@ The `MultiHeadAttention` class handles the core attention mechanism:
 
 ### Position Encodings
 
-Three options:
-- **Fixed sinusoidal**: The original approach from "Attention Is All You Need"
-- **Learned embeddings**: Standard trainable position embeddings
-- **Rotary (RoPE)**: Position-dependent rotations applied to queries and keys
+Two model-level mechanisms are wired in:
+- **Learned embeddings**: Standard trainable position embeddings in the encoder and decoder
+- **Rotary (RoPE)**: Optional position-dependent rotations applied to queries and keys
+
+The fixed sinusoidal `PositionalEncoding` module is available as a standalone building block, but the main model classes use learned embeddings plus optional RoPE.
 
 ### Activations
 
@@ -319,7 +322,8 @@ config = TransformerConfig(
     dropout=0.1,             # Dropout rate
     activation="swiglu",     # "gelu", "relu", or "swiglu"
     max_seq_len=2048,        # Maximum sequence length
-    output_dim=None          # Custom output size (defaults to vocab_size)
+    output_dim=10,           # Required for classification/regression heads
+    causal=False             # Set True for autoregressive token modeling
 )
 ```
 
@@ -428,18 +432,18 @@ I wrote a fairly comprehensive test suite to catch regressions. Run it with:
 
 ```bash
 # All tests
-uv run --extra dev pytest tests/
+uv run pytest tests/
 
 # With coverage
-uv run --extra dev pytest tests/ --cov=miniformer
+uv run pytest tests/ --cov=miniformer
 
 # Specific test groups
-uv run --extra dev pytest tests/test_model/       # Model architecture tests
-uv run --extra dev pytest tests/test_train/       # Training pipeline tests
-uv run --extra dev pytest tests/test_integration/ # End-to-end tests
+uv run pytest tests/test_model/       # Model architecture tests
+uv run pytest tests/test_train/       # Training pipeline tests
+uv run pytest tests/test_integration/ # End-to-end tests
 
 # Pattern matching
-uv run --extra dev pytest tests/ -k "attention"  # Only attention-related tests
+uv run pytest tests/ -k "attention"  # Only attention-related tests
 ```
 
 The tests cover:
@@ -456,23 +460,23 @@ The tests cover:
 ### What Works Now
 
 The library currently handles:
-- ✅ **Full encoder and seq2seq architectures**
-- ✅ **Multi-head attention with RoPE support**
-- ✅ **SwiGLU and other gated activations**
-- ✅ **Plain PyTorch training pipeline**
-- ✅ **KV-cache for generation**
-- ✅ **Forward-pass visualization traces and attention plots**
-- ✅ **Classification, regression, and language modeling tasks**
-- ✅ **Proper initialization and numerical stability**
+- Full encoder and seq2seq architectures
+- Multi-head attention with RoPE support
+- SwiGLU and other gated activations
+- Plain PyTorch training pipeline
+- Decoder KV-cache for seq2seq generation
+- Forward-pass visualization traces and attention plots
+- Classification, regression, and language modeling tasks
+- Proper initialization and numerical stability
 
 ### Current Limitations
 
 Some things I haven't gotten to yet:
-- ❌ **FlashAttention-specific integration**: PyTorch SDPA is available, but direct FlashAttention 2 APIs are not wired in
-- ❌ **Beam search**: Only greedy and sampling generation for now
-- ❌ **Model parallelism**: Single-GPU training only
-- ❌ **Quantization**: No INT8/FP16 optimization yet
-- ❌ **Advanced features**: No mixture of experts, sparse attention, etc.
+- **FlashAttention-specific integration**: PyTorch SDPA is available, but direct FlashAttention 2 APIs are not wired in
+- **Beam search**: Seq2seq generation uses sampling; beam search is not implemented
+- **Model parallelism**: The trainer uses one CPU or CUDA device
+- **Quantization**: No INT8/FP16 optimization path yet
+- **Advanced features**: No mixture of experts, sparse attention, or distributed training
 
 ### What I'm Working On
 

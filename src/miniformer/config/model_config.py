@@ -20,6 +20,7 @@ class TransformerConfig:
     max_seq_len: int = 1024
     pre_norm: bool = True
     use_sdpa: bool = False
+    causal: bool = True  # Token Transformer defaults to autoregressive self-attention
     rotary_pct: float = 0.0  # 0 = disabled, 1 = full head dimension
     
     # Input/Output dimensions

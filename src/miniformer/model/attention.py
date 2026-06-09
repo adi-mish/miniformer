@@ -131,8 +131,12 @@ class MultiHeadAttention(nn.Module):
             scale = 1.0 / math.sqrt(self.d_k)
             scores = torch.matmul(q, k.transpose(-2, -1)) * scale  # [B, H, L, S]
             if mask is not None:
-                scores = scores.masked_fill(~mask, -1e4)
+                if mask.dtype is not torch.bool:
+                    raise TypeError("attention mask must be a boolean tensor")
+                scores = scores.masked_fill(~mask, torch.finfo(scores.dtype).min)
             attn = F.softmax(scores, dim=-1)
+            if mask is not None:
+                attn = attn.masked_fill(~mask, 0.0)
             attn = self.dropout(attn)
             out = torch.matmul(attn, v).transpose(1, 2)  # [B, L, H, D]
 

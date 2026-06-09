@@ -4,7 +4,7 @@ import torch
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
 from miniformer.model.transformer import Transformer
-from miniformer.visualization import capture_transformer_trace, plot_trace_summary
+from miniformer.visualization import capture_transformer_trace, plot_attention, plot_trace_summary
 
 matplotlib.use("Agg")
 
@@ -54,3 +54,23 @@ def test_capture_transformer_trace_seq2seq_and_plot():
     assert len(trace.attentions) == 3
     assert ax.get_ylabel() == "Activation norm"
     assert fig is not None
+
+
+def test_plot_attention_rejects_unavailable_attention_weights():
+    try:
+        plot_attention([None], layer=0, head=0)
+    except ValueError as exc:
+        assert "use_sdpa=True" in str(exc)
+    else:
+        raise AssertionError("plot_attention should reject unavailable attention weights")
+
+
+def test_plot_attention_validates_token_length():
+    attention = torch.ones(1, 1, 2, 2)
+
+    try:
+        plot_attention([attention], tokens=["only-one"])
+    except ValueError as exc:
+        assert "tokens length" in str(exc)
+    else:
+        raise AssertionError("plot_attention should reject mismatched token labels")

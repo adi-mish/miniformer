@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -25,9 +25,18 @@ class MiniFormerModule(nn.Module):
         self.tokenizer = None
         self.pad_id = 0
 
+        if cfg.task == "language_modeling" and cfg.model != "seq2seq":
+            raise ValueError("language_modeling currently requires model='seq2seq'")
+        if cfg.task != "language_modeling" and cfg.model != "encoder":
+            raise ValueError(f"{cfg.task} currently requires model='encoder'")
+
         model_config = dict(cfg.model_config)
         if cfg.task == "language_modeling" and model_config.get("output_dim") is None:
             model_config["output_dim"] = model_config.get("vocab_size")
+        if cfg.task != "language_modeling" and model_config.get("output_dim") is None:
+            raise ValueError(f"{cfg.task} requires model_config['output_dim']")
+        if cfg.task != "language_modeling" and "causal" not in model_config:
+            model_config["causal"] = False
         self.cfg.model_config = model_config
 
         if cfg.task == "language_modeling":
@@ -53,6 +62,8 @@ class MiniFormerModule(nn.Module):
                 torch.tensor([ord(char) % vocab_size for char in sample["input"]], dtype=torch.long)
                 for sample in batch
             ]
+            if any(ids.numel() == 0 for ids in tokenized):
+                raise ValueError("String inputs must not be empty")
             max_len = max(ids.size(0) for ids in tokenized)
             input_ids = torch.zeros(len(batch), max_len, dtype=torch.long, device=self.device)
             for i, ids in enumerate(tokenized):

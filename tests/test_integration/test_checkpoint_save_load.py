@@ -20,6 +20,7 @@ def make_data(tmp_path):
 def make_cfg(tmp_path, data, max_epochs=1):
     return TrainConfig(
         task="classification",
+        model="encoder",
         train_path=data.train_file,
         val_path=data.val_file,
         batch_size=3,

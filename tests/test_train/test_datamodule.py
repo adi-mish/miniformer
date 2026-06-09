@@ -1,7 +1,3 @@
-import sys
-import pathlib
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent / 'src'))
-
 import json
 import torch
 import pytest
@@ -22,7 +18,7 @@ def create_jsonlines_file(tmp_path, records):
 
 
 def test_jsonlines_dataset_lm(tmp_path):
-    records = [{"text": "ab"}, {"text": "c"}]
+    records = [{"text": "ab"}, {"text": "cd"}]
     path = create_jsonlines_file(tmp_path, records)
     ds = JSONLinesDataset(path, tokenizer=DummyTokenizer(), task="language_modeling")
     assert len(ds) == 2
@@ -34,6 +30,30 @@ def test_jsonlines_dataset_lm(tmp_path):
     # missing tokenizer should error
     with pytest.raises(ValueError):
         JSONLinesDataset(path, tokenizer=None, task="language_modeling")[0]
+
+
+def test_jsonlines_dataset_lm_rejects_too_short_text(tmp_path):
+    path = create_jsonlines_file(tmp_path, [{"text": "a"}])
+    ds = JSONLinesDataset(path, tokenizer=DummyTokenizer(), task="language_modeling")
+
+    with pytest.raises(ValueError, match="at least two tokens"):
+        ds[0]
+
+
+def test_jsonlines_dataset_rejects_invalid_records(tmp_path):
+    path = tmp_path / "bad.jsonl"
+    path.write_text("not json\n")
+
+    with pytest.raises(ValueError, match="Invalid JSONL record"):
+        JSONLinesDataset(str(path), tokenizer=None, task="classification")
+
+
+def test_jsonlines_dataset_rejects_non_object_records(tmp_path):
+    path = tmp_path / "bad.jsonl"
+    path.write_text("[1, 2, 3]\n")
+
+    with pytest.raises(ValueError, match="must be an object"):
+        JSONLinesDataset(str(path), tokenizer=None, task="classification")
 
 
 def test_jsonlines_dataset_classification_and_regression(tmp_path):
@@ -54,7 +74,7 @@ def test_jsonlines_dataset_classification_and_regression(tmp_path):
 
 
 def test_datamodule_lm(tmp_path):
-    records = [{"text": "aaa"}, {"text": "b"}]
+    records = [{"text": "aaa"}, {"text": "bb"}]
     path = create_jsonlines_file(tmp_path, records)
     cfg = SimpleNamespace(
         train_path=path, val_path="", test_path="",
@@ -85,3 +105,28 @@ def test_datamodule_classification(tmp_path):
     # non-LM batches returned as list of dicts
     assert isinstance(batch, list)
     assert batch[0]["input"] == "x"
+
+
+def test_datamodule_numeric_features_collate_dtype(tmp_path):
+    records = [
+        {"input": [{"a": 1.0, "b": 2.0}], "label": 1},
+        {"input": [{"a": 3.0, "b": 4.0}, {"a": 5.0, "b": 6.0}], "label": 0},
+    ]
+    path = create_jsonlines_file(tmp_path, records)
+    cfg = SimpleNamespace(
+        train_path=path,
+        val_path="",
+        test_path="",
+        batch_size=2,
+        num_workers=0,
+        task="classification",
+        shuffle_train=False,
+    )
+    dm = MiniFormerDataModule(cfg, tokenizer=None)
+    dm.setup()
+
+    batch = next(iter(dm.train_dataloader()))
+
+    assert batch["input"].shape == (2, 2, 2)
+    assert batch["input"].dtype == torch.float32
+    assert batch["labels"].dtype == torch.long

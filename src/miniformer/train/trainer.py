@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import os
 import random
 from pathlib import Path
 from typing import Dict, Iterable, Optional
@@ -28,8 +27,11 @@ def _mean_metrics(metrics: Iterable[Dict[str, float]]) -> Dict[str, float]:
     rows = list(metrics)
     if not rows:
         return {}
-    keys = rows[0].keys()
-    return {key: sum(row[key] for row in rows if key in row) / len(rows) for key in keys}
+    keys = sorted({key for row in rows for key in row})
+    return {
+        key: sum(row[key] for row in rows if key in row) / sum(1 for row in rows if key in row)
+        for key in keys
+    }
 
 
 def _metric_is_better(value: float, best: Optional[float], metric_name: str) -> bool:

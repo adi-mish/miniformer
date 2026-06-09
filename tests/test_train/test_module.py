@@ -24,7 +24,7 @@ def make_cfg(task: str, scheduler: str = "none", output_dim: Optional[int] = Non
         model_config["output_dim"] = 1
 
     return SimpleNamespace(
-        model="seq2seq",
+        model="seq2seq" if task == "language_modeling" else "encoder",
         task=task,
         model_config=model_config,
         lr=0.01,
@@ -90,6 +90,42 @@ def test_training_step_classification_uses_real_model():
     loss = module.training_step(batch, 0)
     assert isinstance(loss, torch.Tensor)
     assert loss.requires_grad
+
+
+def test_empty_string_batch_raises_clear_error():
+    module = MiniFormerModule(make_cfg("classification", "none"))
+
+    with pytest.raises(ValueError, match="must not be empty"):
+        module.training_step([{"input": "", "labels": 0}], 0)
+
+
+def test_non_lm_training_defaults_to_bidirectional_attention():
+    module = MiniFormerModule(make_cfg("classification", "none"))
+
+    assert module.cfg.model_config["causal"] is False
+    assert module.model.config.causal is False
+
+
+def test_language_modeling_keeps_causal_attention_default():
+    module = MiniFormerModule(make_cfg("language_modeling", "none"))
+
+    assert module.model.config.causal is True
+
+
+def test_invalid_task_model_combination_raises():
+    cfg = make_cfg("classification", "none")
+    cfg.model = "seq2seq"
+
+    with pytest.raises(ValueError, match="requires model='encoder'"):
+        MiniFormerModule(cfg)
+
+
+def test_non_lm_task_requires_output_dim():
+    cfg = make_cfg("classification", "none")
+    del cfg.model_config["output_dim"]
+
+    with pytest.raises(ValueError, match="requires model_config\\['output_dim'\\]"):
+        MiniFormerModule(cfg)
 
 
 def test_validation_step_returns_metrics():

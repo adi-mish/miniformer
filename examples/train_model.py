@@ -28,7 +28,6 @@ def main():
     
     # Create output directories
     os.makedirs(args.output_dir, exist_ok=True)
-    os.makedirs(args.checkpoint_dir, exist_ok=True)
     
     # Load configuration
     if args.config == "tiny":

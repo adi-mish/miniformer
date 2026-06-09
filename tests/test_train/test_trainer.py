@@ -1,7 +1,7 @@
 import torch
 
 from miniformer.train.train_config import TrainConfig
-from miniformer.train.trainer import evaluate, seed_everything, train_model, train_one_epoch
+from miniformer.train.trainer import _mean_metrics, evaluate, seed_everything, train_model, train_one_epoch
 
 
 class TinyModule(torch.nn.Module):
@@ -55,6 +55,15 @@ def test_evaluate_averages_metrics():
     assert metrics["val_loss"] == 2.5
 
 
+def test_mean_metrics_averages_only_present_keys():
+    metrics = _mean_metrics([
+        {"val_loss": 2.0, "val_accuracy": 1.0},
+        {"val_loss": 4.0},
+    ])
+
+    assert metrics == {"val_accuracy": 1.0, "val_loss": 3.0}
+
+
 def test_train_model_smoke(tmp_path):
     train_path = tmp_path / "train.jsonl"
     val_path = tmp_path / "val.jsonl"
@@ -63,6 +72,7 @@ def test_train_model_smoke(tmp_path):
 
     cfg = TrainConfig(
         task="classification",
+        model="encoder",
         train_path=str(train_path),
         val_path=str(val_path),
         batch_size=2,

@@ -1,22 +1,31 @@
 from __future__ import annotations
 
-import os
+import ast
+import json
+from pathlib import Path
+
 import torch
 from torch.utils.data import DataLoader, Dataset
+
 
 class JSONLinesDataset(Dataset):
     """A minimal Dataset reading line-separated JSON records."""
     def __init__(self, path: str, tokenizer=None, task: str = "language_modeling"):
         super().__init__()
-        import json, pathlib, ast
-        raw = pathlib.Path(path).read_text().splitlines()
         self.data = []
-        for idx, line in enumerate(raw):
+        for line_number, line in enumerate(Path(path).read_text().splitlines(), start=1):
+            line = line.strip()
+            if not line:
+                continue
             try:
                 record = json.loads(line)
             except json.JSONDecodeError:
-                # fall back to Python literal eval for single-quoted dicts
-                record = ast.literal_eval(line)
+                try:
+                    record = ast.literal_eval(line)
+                except (SyntaxError, ValueError) as literal_error:
+                    raise ValueError(f"Invalid JSONL record at line {line_number}") from literal_error
+            if not isinstance(record, dict):
+                raise ValueError(f"JSONL record at line {line_number} must be an object")
             self.data.append(record)
         self.tokenizer = tokenizer
         self.task = task
@@ -32,6 +41,8 @@ class JSONLinesDataset(Dataset):
             if self.tokenizer is None:
                 raise ValueError("Tokenizer required for LM task")
             ids = torch.tensor(self.tokenizer.encode(txt, add_special_tokens=True), dtype=torch.long)
+            if ids.numel() < 2:
+                raise ValueError("Language modeling records must produce at least two tokens")
             return {"input_ids": ids[:-1], "labels": ids[1:]}
 
         elif self.task == "classification":
@@ -87,44 +98,45 @@ class MiniFormerDataModule:
 
     def _collate_fn(self, batch):
         """
-        Unit tests expect three different behaviours:
-
-        • language_modeling  – return a dict with padded Long tensors
-        • classification/regression when input is a *string*  – **return the raw list** unchanged
-        • classification/regression when input is a list[dict] of numeric features –
-        return padded float tensors (keep the code you already wrote).
-
-        Anything else falls back to the raw list.
+        Language-modeling batches are padded tensors. String classification and
+        regression batches stay as raw records so tokenization can happen in the
+        training module. Numeric feature sequences are padded into tensors.
         """
         task = self.cfg.task
 
         # ------------------------------------------------------------------ 1. LM
         if task == "language_modeling":
-            lengths  = [b["input_ids"].size(0) for b in batch]
-            max_len  = max(lengths)
+            lengths = [b["input_ids"].size(0) for b in batch]
+            max_len = max(lengths)
             input_ids = torch.full((len(batch), max_len), 0, dtype=torch.long)
-            labels    = torch.full_like(input_ids, -100)
+            labels = torch.full_like(input_ids, -100)
             for i, b in enumerate(batch):
                 l = lengths[i]
                 input_ids[i, :l] = b["input_ids"]
-                labels[i,   :l]  = b["labels"]
+                labels[i, :l] = b["labels"]
             return {"input_ids": input_ids, "labels": labels}
 
         # ---------------------------------------------------- 2. string inputs → return list
         if task in {"classification", "regression"} and isinstance(batch[0]["input"], str):
-            return batch                                           # ← unit-test expects list
+            return batch
 
-        # ------------------------------------------------ 3. numeric sequence features (your code)
+        # ------------------------------------------------ 3. numeric sequence features
         if task in {"classification", "regression"}:
-            seq_lens  = [len(s["input"]) for s in batch]
-            max_len   = max(seq_lens)
+            seq_lens = [len(s["input"]) for s in batch]
+            if min(seq_lens) == 0:
+                raise ValueError("Numeric feature sequences must not be empty")
+            max_len = max(seq_lens)
             feat_keys = list(batch[0]["input"][0].keys())
-            feat_dim  = len(feat_keys)
+            feat_dim = len(feat_keys)
 
             x = torch.zeros(len(batch), max_len, feat_dim, dtype=torch.float32)
-            y = torch.tensor([b["labels"] for b in batch])
+            label_dtype = torch.long if task == "classification" else torch.float32
+            y = torch.as_tensor([b["labels"] for b in batch], dtype=label_dtype)
             for i, sample in enumerate(batch):
-                seq = torch.tensor([[step[k] for k in feat_keys] for step in sample["input"]])
+                seq = torch.tensor(
+                    [[step[k] for k in feat_keys] for step in sample["input"]],
+                    dtype=torch.float32,
+                )
                 x[i, : seq.size(0)] = seq
             return {"input": x, "labels": y}
 

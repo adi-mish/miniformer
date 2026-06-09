@@ -22,18 +22,7 @@ class Transformer(nn.Module):
         • When we project to *vocab_size* we **tie** the weights with the
           input embedding (classic weight-tying).
         """
-        # ── guard flag for __getattr__ recursion ───────────────────────────
-        self._in_init = True
-
-        # FIRST call the parent constructor so that _modules and friends exist
         super().__init__()
-
-        # ── placeholders to satisfy any early attribute access ────────────
-        # (They will be overwritten with real modules below.)
-        self.encoder = nn.Identity()
-        self.token_embedding = None
-        self.input_projection = None
-        self.original_model = None   # used by some external mocks/tests
 
         # ── resolve / patch configuration ─────────────────────────────────
         if config is None:
@@ -46,7 +35,6 @@ class Transformer(nn.Module):
         self.pad_id = 0  # default padding token id
 
         # ── real encoder backbone ─────────────────────────────────────────
-        from miniformer.model.encoder import Encoder
         self.encoder = Encoder(config)
         self.token_embedding = self.encoder.token_embedding      # expose for tests
         self.input_projection = self.encoder.input_projection    # expose for tests
@@ -73,59 +61,21 @@ class Transformer(nn.Module):
             self.output_projection = nn.Linear(config.d_model, target_dim)
             self._tied_weights = False
 
-        # ── finished initialisation ──────────────────────────────────────
-        self._in_init = False
-
     def _build_mask(self, seq: torch.Tensor) -> torch.Tensor:
-        """Default padding + causal mask like the one in seq2seq_transformer."""
+        """Build a padding mask, with optional autoregressive masking."""
         B, S = seq.shape[0], seq.shape[1]
         if seq.dim() == 2 and seq.dtype == torch.long:  # token path - check both conditions
-            # Create padding mask (True for non-padding tokens)
             pad = (seq != self.pad_id).unsqueeze(1).unsqueeze(2)  # [B,1,1,S]
-            # Create causal mask
+            if not self.config.causal:
+                return pad
             causal = torch.tril(torch.ones(S, S, device=seq.device, dtype=torch.bool))
-            # Combine padding and causal masks
             return pad & causal.unsqueeze(0).unsqueeze(0)  # [B,1,S,S]
-        else:  # feature path
-            return torch.ones((B, 1, S, S), device=seq.device, dtype=torch.bool)
 
-    def __getattribute__(self, name):
-        """
-        Robust attribute resolution that keeps PyTorch’s default module/param
-        lookup *even when a subclass overrides ``__getattr__``.
+        if not self.config.causal:
+            return torch.ones((B, 1, 1, S), device=seq.device, dtype=torch.bool)
 
-        Why?  
-        In the integration test a subclass (`MockModel`) overrides
-        ``__getattr__`` to delegate every missing attribute to an
-        *original_model* instance.  That masks the standard `nn.Module`
-        behaviour which would normally fetch sub-modules (like ``encoder``)
-        from ``self._modules`` when they aren’t in ``__dict__``.  During the
-        *base-class* constructor, those attributes are required **before**
-        `MockModel` finishes setting up its delegation target, so the lookup
-        blows up.
-
-        By overriding **``__getattribute__``** here we short-circuit that
-        problem: if the regular lookup via `super().__getattribute__()` fails
-        we *manually* replicate what `nn.Module.__getattr__` would have done,
-        checking ``_modules``, ``_parameters`` and ``_buffers`` directly.
-        Only if the attribute is truly absent do we re-raise, allowing any
-        subclass ``__getattr__`` to run.
-        """
-        try:
-            return super().__getattribute__(name)
-        except AttributeError:
-            # —— fall back to the internal containers just like nn.Module —— #
-            modules = super().__getattribute__("_modules")
-            if name in modules:
-                return modules[name]
-            params = super().__getattribute__("_parameters")
-            if name in params:
-                return params[name]
-            buffers = super().__getattribute__("_buffers")
-            if name in buffers:
-                return buffers[name]
-            # still not found → let any subclass‐level __getattr__ handle it
-            raise
+        causal = torch.tril(torch.ones(S, S, device=seq.device, dtype=torch.bool))
+        return causal.unsqueeze(0).unsqueeze(0).expand(B, 1, S, S)
 
     def forward(
         self,
@@ -149,8 +99,7 @@ class Transformer(nn.Module):
         tokens together with the updated cache.
 
         This "whole-sequence" trick is slower than true KV caching but is
-        perfectly adequate for the unit-tests, and it lets us avoid touching
-        the encoder internals.
+        easy to reason about and keeps the encoder internals simple.
         """
         # Handle non-tensor inputs (batches that are lists/dicts)
         if not isinstance(x, torch.Tensor):
@@ -245,5 +194,5 @@ class Transformer(nn.Module):
 
         model = cls(config)
         model_path = os.path.join(model_dir, "model.pt")
-        model.load_state_dict(torch.load(model_path))
+        model.load_state_dict(torch.load(model_path, map_location="cpu", weights_only=True))
         return model

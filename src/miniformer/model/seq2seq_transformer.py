@@ -6,7 +6,6 @@ arbitrary feature vectors (e.g. audio, vision, time-series)."""
 
 from __future__ import annotations
 
-import math
 from typing import Optional
 
 import torch
@@ -206,20 +205,14 @@ class Seq2SeqTransformer(nn.Module):
         use_cache = True
 
         for _ in range(max_new_tokens):
-            tgt_mask = create_padding_mask(generated)
-            # When generating we only need causal mask for the current step
-            if use_cache and past_key_values is not None:
-                causal = create_causal_mask(1, device)
-                tgt_mask = tgt_mask[:, :, :, -1:] & causal[:, :, -1:, :]
-
             # Use caching for more efficient generation
             if use_cache:
                 dec_out, self_attns, cross_attns, past_key_values = self.decoder(
                     generated if past_key_values is None else generated[:, -1:],
                     memory,
-                    tgt_mask,
+                    None,
                     src_mask,
-                    use_causal_mask=False,
+                    use_causal_mask=True,
                     past_key_values=past_key_values,
                     use_cache=True,
                 )
@@ -227,9 +220,9 @@ class Seq2SeqTransformer(nn.Module):
                 dec_out, _, _ = self.decoder(
                     generated,
                     memory,
-                    tgt_mask,
+                    None,
                     src_mask,
-                    use_causal_mask=False,
+                    use_causal_mask=True,
                 )
 
             # Get logits for the next token. If normal forward() is configured
@@ -240,6 +233,11 @@ class Seq2SeqTransformer(nn.Module):
                 logits = torch.matmul(step_out, self.decoder.token_embedding.weight.t())
             else:
                 logits = step_out
+            if logits.size(-1) != self.config.vocab_size:
+                raise RuntimeError(
+                    "generate() requires decoder outputs over the token vocabulary; "
+                    "set output_dim to vocab_size or leave it unset."
+                )
             logits = logits / temperature
 
             # Apply top-k and top-p filtering

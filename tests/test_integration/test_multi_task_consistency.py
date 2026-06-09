@@ -1,17 +1,7 @@
-import os
-import tempfile
 import torch
-import pytest
-import json
-from types import SimpleNamespace
-import pathlib
-import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent / 'src'))
-
-from miniformer.train.train_config import TrainConfig
 from miniformer.train.module import MiniFormerModule
-from miniformer.model.transformer import Transformer, TransformerConfig
+from miniformer.train.train_config import TrainConfig
 
 
 class TestMultiTaskConsistency:
@@ -58,15 +48,12 @@ class TestMultiTaskConsistency:
             model = MiniFormerModule(cfg)
             models[task] = model
         
-        # Create a regression model with the same architecture
-        reg_cfg = TrainConfig()
-        reg_cfg.task = "regression"  # This is already a literal, so it's fine
-        reg_cfg.model_config = base_config.copy()
         clf_state_dict = models["classification"].model.state_dict()
         
         # Create a regression model with the same architecture
         reg_cfg = TrainConfig()
         reg_cfg.task = "regression"
+        reg_cfg.model = "encoder"
         reg_cfg.model_config = base_config.copy()
         reg_cfg.model_config["output_dim"] = 1  # Regression output
         

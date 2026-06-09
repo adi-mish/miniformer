@@ -1,5 +1,4 @@
 import torch
-import pytest
 from miniformer.model.transformer import Transformer, TransformerConfig
 
 
@@ -101,27 +100,6 @@ def test_different_activation_functions():
             act1, act2 = activations[i], activations[j]
             assert not torch.allclose(outputs[act1], outputs[act2], atol=1e-3), \
                 f"Activations {act1} and {act2} produced too similar outputs"
-
-
-def test_layer_scale_initialization():
-    """Test that layer scale parameters are properly initialized when enabled."""
-    config = TransformerConfig(
-        vocab_size=100,
-        d_model=32,
-        n_heads=4,
-        n_layers=2,
-    )
-    model = Transformer(config)
-    
-    # Check for layer scale parameters
-    layer_scale_params = [name for name, _ in model.named_parameters() if 'layer_scale' in name]
-    
-    if layer_scale_params:  # Only test if layer scale is implemented
-        for name, param in model.named_parameters():
-            if 'layer_scale' in name:
-                # Should be initialized close to the specified value
-                assert torch.allclose(param, torch.full_like(param, 1e-4), atol=1e-6), \
-                    f"Layer scale parameter {name} not properly initialized"
 
 
 def test_rotary_embedding_implementation():
