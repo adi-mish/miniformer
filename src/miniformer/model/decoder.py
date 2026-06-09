@@ -9,6 +9,7 @@ import torch.nn as nn
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.attention import MultiHeadAttention
 from miniformer.model.feedforward import FeedForward
+from miniformer.model.masks import causal_mask
 
 KeyValue = Tuple[torch.Tensor, torch.Tensor]
 LayerPastKeyValues = Tuple[Optional[KeyValue], Optional[KeyValue]]
@@ -205,10 +206,8 @@ class Decoder(nn.Module):
         device: torch.device,
         past_len: int = 0,
     ) -> torch.Tensor:
-        """Create a cache-aware causal mask [query_len, key_len]."""
-        query_positions = torch.arange(past_len, past_len + seq_len, device=device).unsqueeze(1)
-        key_positions = torch.arange(past_len + seq_len, device=device).unsqueeze(0)
-        return key_positions <= query_positions
+        """Create a cache-aware causal mask [1, 1, query_len, key_len]."""
+        return causal_mask(seq_len, past_len=past_len, device=device)
 
     def forward(
         self,

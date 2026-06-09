@@ -16,6 +16,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from miniformer.model.masks import validate_attention_mask
+
 
 def _rotate_half(x: torch.Tensor) -> torch.Tensor:
     """Utility used by RoPE – slice and rotate last dim (= head‑dim)."""
@@ -123,6 +125,14 @@ class MultiHeadAttention(nn.Module):
             k = torch.cat([pk, k], dim=2)  # time dim = 2 after transpose
             v = torch.cat([pv, v], dim=2)
 
+        if mask is not None:
+            mask = validate_attention_mask(
+                mask,
+                query_len=L,
+                key_len=k.size(2),
+                batch_size=B,
+            )
+
         # SDPA or manual attention -----------------------------------------
         if self.use_sdpa:
             dropout_p = self.dropout.p if self.training else 0.0
@@ -133,8 +143,6 @@ class MultiHeadAttention(nn.Module):
             scale = 1.0 / math.sqrt(self.d_k)
             scores = torch.matmul(q, k.transpose(-2, -1)) * scale  # [B, H, L, S]
             if mask is not None:
-                if mask.dtype is not torch.bool:
-                    raise TypeError("attention mask must be a boolean tensor")
                 scores = scores.masked_fill(~mask, torch.finfo(scores.dtype).min)
             attn = F.softmax(scores, dim=-1)
             if mask is not None:

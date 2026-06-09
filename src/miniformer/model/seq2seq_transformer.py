@@ -15,6 +15,11 @@ import torch.nn as nn
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.decoder import AttentionList, Decoder, DecoderPastKeyValues
 from miniformer.model.encoder import Encoder  # existing encoder stack
+from miniformer.model.masks import (
+    causal_mask,
+    combine_masks,
+    padding_mask,
+)
 
 if TYPE_CHECKING:
     from miniformer.inspect import TransformerTrace
@@ -62,26 +67,13 @@ class Seq2SeqModelOutput:
 
 
 def create_padding_mask(seq: torch.Tensor, pad_id: int = 0) -> torch.Tensor:
-    """Create a mask to hide padding tokens.
-
-    Args:
-        seq: 2-D integer tensor [batch, seq_len] or 3-D feature tensor [batch, seq_len, dim].
-        pad_id: token id that represents padding when seq is integer-typed.
-
-    Returns:
-        [batch, 1, 1, seq_len] boolean mask with True for valid (non-pad) tokens.
-    """
-    if seq.dim() == 2 and seq.dtype == torch.long:  # Modified to check both conditions
-        mask = (seq != pad_id).unsqueeze(1).unsqueeze(2)
-    else:
-        mask = torch.ones(seq.size(0), 1, 1, seq.size(1), device=seq.device, dtype=torch.bool)
-    return mask
+    """Backward-compatible wrapper for :func:`miniformer.model.masks.padding_mask`."""
+    return padding_mask(seq, pad_id=pad_id)
 
 
 def create_causal_mask(seq_len: int, device: torch.device) -> torch.Tensor:
-    """Standard autoregressive lower-triangular mask [1, 1, seq_len, seq_len]."""
-    mask = torch.triu(torch.ones(seq_len, seq_len, device=device, dtype=torch.bool), diagonal=1)
-    return ~mask.unsqueeze(0).unsqueeze(0)  # Add batch and head dims to match padding mask
+    """Backward-compatible wrapper for a standard autoregressive causal mask."""
+    return causal_mask(seq_len, device=device)
 
 
 class Seq2SeqTransformer(nn.Module):
@@ -151,13 +143,12 @@ class Seq2SeqTransformer(nn.Module):
         """Return projected logits when ``output_dim`` is set, otherwise decoder hidden states."""
         # ── build masks ─────────────────────────────────────────────────
         if src_mask is None:
-            src_mask = create_padding_mask(src)
+            src_mask = padding_mask(src)
         if tgt_mask is None:
-            tgt_mask = create_padding_mask(tgt)
+            tgt_mask = padding_mask(tgt)
         if use_causal_mask:
-            # causal mask [1,1,S,S] broadcasts cleanly against padding [B,1,1,S]
-            causal = create_causal_mask(tgt.size(1), tgt.device)
-            tgt_mask = tgt_mask & causal  # final shape [B,1,S,S]
+            tgt_mask = combine_masks(tgt_mask, causal_mask(tgt.size(1), device=tgt.device))
+            assert tgt_mask is not None
         if memory_mask is None:
             memory_mask = src_mask
 
@@ -228,7 +219,7 @@ class Seq2SeqTransformer(nn.Module):
             raise ValueError("temperature must be positive")
 
         device = src.device
-        src_mask = create_padding_mask(src)
+        src_mask = padding_mask(src)
         memory = self.encoder(src, src_mask)
         generated = torch.full((src.size(0), 1), bos_token_id, dtype=torch.long, device=device)
 

@@ -8,6 +8,7 @@ import torch.nn as nn
 
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.encoder import Encoder
+from miniformer.model.masks import padding_mask, self_attention_mask
 from miniformer.utils.tokenization import stable_token_id
 
 if TYPE_CHECKING:
@@ -70,19 +71,7 @@ class Transformer(nn.Module):
 
     def _build_mask(self, seq: torch.Tensor) -> torch.Tensor:
         """Build a padding mask, with optional autoregressive masking."""
-        B, S = seq.shape[0], seq.shape[1]
-        if seq.dim() == 2 and seq.dtype == torch.long:  # token path - check both conditions
-            pad = (seq != self.pad_id).unsqueeze(1).unsqueeze(2)  # [B,1,1,S]
-            if not self.config.causal:
-                return pad
-            causal = torch.tril(torch.ones(S, S, device=seq.device, dtype=torch.bool))
-            return pad & causal.unsqueeze(0).unsqueeze(0)  # [B,1,S,S]
-
-        if not self.config.causal:
-            return torch.ones((B, 1, 1, S), device=seq.device, dtype=torch.bool)
-
-        causal = torch.tril(torch.ones(S, S, device=seq.device, dtype=torch.bool))
-        return causal.unsqueeze(0).unsqueeze(0).expand(B, 1, S, S)
+        return self_attention_mask(seq, causal=self.config.causal, pad_id=self.pad_id)
 
     def forward(
         self,
@@ -179,7 +168,7 @@ class Transformer(nn.Module):
 
     def _create_mask(self, x):
         """Create a mask to hide padding tokens"""
-        return (x != 0).unsqueeze(1).unsqueeze(2)
+        return padding_mask(x, pad_id=self.pad_id)
 
     def get_attention_weights(self, x):
         """Get attention weights for visualization"""

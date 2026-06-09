@@ -8,6 +8,8 @@ from typing import Any, List, Mapping, MutableMapping, Optional, Sequence, cast
 import torch
 import torch.nn.functional as F
 
+from miniformer.model.masks import padding_mask
+
 
 @dataclass(frozen=True)
 class TensorSummary:
@@ -297,12 +299,6 @@ def _compare_encoder_cache(
     )
 
 
-def _padding_mask(seq: torch.Tensor, pad_id: int = 0) -> torch.Tensor:
-    if seq.dim() == 2 and seq.dtype == torch.long:
-        return (seq != pad_id).unsqueeze(1).unsqueeze(2)
-    return torch.ones(seq.size(0), 1, 1, seq.size(1), device=seq.device, dtype=torch.bool)
-
-
 def _compare_seq2seq_cache(
     model: torch.nn.Module,
     src: torch.Tensor,
@@ -356,7 +352,7 @@ def _compare_seq2seq_cache(
             reason="could not infer full-sequence tensor output",
         )
 
-    src_mask = _padding_mask(src)
+    src_mask = padding_mask(src)
     model_any = cast(Any, model)
     enc_input_proj = getattr(model_any, "_enc_input_proj", None)
     src_proj = enc_input_proj(src) if enc_input_proj is not None and src.dim() == 3 else src

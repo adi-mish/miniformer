@@ -90,6 +90,7 @@ miniformer/
 │   │   ├── attention.py     # Multi-head attention with RoPE
 │   │   ├── embedding.py     # Token & positional embeddings
 │   │   ├── feedforward.py   # MLP layers with different activations
+│   │   ├── masks.py         # Padding, causal, and broadcast mask helpers
 │   │   ├── transformer.py   # Encoder-only model
 │   │   ├── encoder.py       # Encoder stack for seq2seq
 │   │   ├── decoder.py       # Decoder stack for seq2seq
@@ -302,6 +303,9 @@ The `MultiHeadAttention` class handles the core attention mechanism:
 - **Rotary Position Embeddings (RoPE)**: Enable with `rotary_pct` in the config (0.0 = disabled, 1.0 = full RoPE).
 - **KV-caching**: The decoder caches key-value pairs across generation steps.
 - **SDPA integration**: PyTorch scaled dot-product attention can be enabled with `use_sdpa=True` in `TransformerConfig`.
+- **Mask semantics**: Attention masks are boolean tensors where `True` means visible.
+  `padding_mask` returns `[batch, 1, 1, key_len]`, `causal_mask` returns
+  `[1, 1, query_len, key_len]`, and `combine_masks` broadcasts them into the final attention mask.
 
 ### Position Encodings
 

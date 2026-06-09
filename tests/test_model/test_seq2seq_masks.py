@@ -1,7 +1,8 @@
 import pytest
 import torch
 
-from miniformer.model.seq2seq_transformer import Seq2SeqTransformer, create_padding_mask
+from miniformer.model.masks import padding_mask
+from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
 from miniformer.model.transformer import TransformerConfig
 
 
@@ -113,7 +114,7 @@ def test_decoder_cache_matches_full_pass_for_chunked_targets():
 
     src = torch.randint(1, config.vocab_size, (2, 5))
     tgt = torch.randint(1, config.vocab_size, (2, 6))
-    src_mask = create_padding_mask(src)
+    src_mask = padding_mask(src)
 
     with torch.no_grad():
         memory = model.encoder(src, src_mask)

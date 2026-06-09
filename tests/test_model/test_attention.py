@@ -3,6 +3,7 @@ import torch
 
 from miniformer.model.attention import MultiHeadAttention
 from miniformer.model.embedding import PositionalEncoding
+from miniformer.model.masks import causal_mask
 from miniformer.model.transformer import Transformer, TransformerConfig
 
 
@@ -110,13 +111,24 @@ def test_manual_and_sdpa_attention_match_with_mask():
     q = torch.randn(2, 5, 32)
     k = torch.randn(2, 5, 32)
     v = torch.randn(2, 5, 32)
-    mask = torch.tril(torch.ones(5, 5, dtype=torch.bool)).unsqueeze(0).unsqueeze(0)
+    mask = causal_mask(5)
 
     with torch.no_grad():
         manual_out, _, _ = manual(q, k, v, mask)
         sdpa_out, _, _ = sdpa(q, k, v, mask)
 
     assert torch.allclose(manual_out, sdpa_out, atol=1e-5)
+
+
+@pytest.mark.parametrize("use_sdpa", [False, True])
+def test_attention_validates_masks_before_backend(use_sdpa):
+    attention = MultiHeadAttention(d_model=16, n_heads=4, dropout=0.0, use_sdpa=use_sdpa)
+    x = torch.randn(2, 3, 16)
+
+    with pytest.raises(TypeError, match="boolean"):
+        attention(x, x, x, torch.ones(1, 1, 3, 3))
+    with pytest.raises(ValueError, match="key dimension"):
+        attention(x, x, x, torch.ones(1, 1, 3, 2, dtype=torch.bool))
 
 
 def test_all_masked_manual_attention_returns_zero_context():
