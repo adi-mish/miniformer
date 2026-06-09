@@ -94,6 +94,7 @@ miniformer/
 │   │   ├── encoder.py       # Encoder stack for seq2seq
 │   │   ├── decoder.py       # Decoder stack for seq2seq
 │   │   └── seq2seq_transformer.py # Full encoder-decoder
+│   ├── inspect/             # Structured tracing for transformer internals
 │   ├── train/               # Training infrastructure
 │   │   ├── datamodule.py    # Data loading (JSONL format)
 │   │   ├── module.py        # Plain PyTorch training wrapper
@@ -220,26 +221,32 @@ generated = model.generate(
 
 ## Visualization
 
-For a quick look inside a forward pass, use the tracing helpers:
+For a quick look inside a forward pass, use the structured inspection API. This runs an eval/no-grad forward pass, restores the model's original training mode, and returns a JSON-serializable trace:
 
 ```python
 import torch
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.transformer import Transformer
-from miniformer.visualization import capture_transformer_trace, plot_trace_summary
+from miniformer.inspect import capture_transformer_trace, plot_trace_summary
 
 model = Transformer(TransformerConfig(vocab_size=1000, d_model=64, n_heads=4, n_layers=2))
 input_ids = torch.randint(1, 1000, (2, 16))
 
-trace = capture_transformer_trace(model, input_ids)
+trace = capture_transformer_trace(model, input_ids, top_k=5, compare_cache=True)
 print(trace.output_shape)
-print(trace.layers[0])
-print(trace.attentions[0])
+print(trace.layers[0].mlp_activation_norm)
+print(trace.attentions[0].entropy)
+print(trace.logits.token_ids[0][0])
+print(trace.cache.allclose)
+
+trace.save_json("trace.json")
 
 fig, ax = plot_trace_summary(trace)
 ```
 
-`capture_transformer_trace` records per-layer activation shape, mean, standard deviation, norm, and attention entropy. For raw attention heatmaps, use `plot_attention(model.get_attention_weights(input_ids))`. Raw attention tensors are only available when `use_sdpa=False`; PyTorch's SDPA path does not return attention weights.
+You can also call `model.trace(input_ids)` or `seq2seq_model.trace(src_ids, tgt_ids)`. Traces include per-layer residual norms, self-attention and cross-attention output norms, MLP activation/output norms, attention entropy when attention weights are available, top-k output predictions when the output is logit-like, and optional cached-vs-uncached consistency metadata.
+
+The old `miniformer.visualization.capture_transformer_trace` import path still works, but `miniformer.inspect` is the canonical API. For raw attention heatmaps, use `plot_attention(model.get_attention_weights(input_ids))`. Raw attention tensors are only available when `use_sdpa=False`; PyTorch's SDPA path does not return attention weights, so the trace marks those attention summaries as unavailable instead of pretending weights exist.
 
 ---
 

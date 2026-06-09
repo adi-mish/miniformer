@@ -1,6 +1,6 @@
-"""Backward-compatible imports for the structured inspection API."""
+"""Structured model inspection APIs."""
 
-from miniformer.inspect import (
+from miniformer.inspect.trace import (
     AttentionTrace,
     CacheTrace,
     LayerTrace,

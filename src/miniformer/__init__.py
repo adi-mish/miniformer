@@ -10,6 +10,8 @@ __all__ = [
     "Transformer",
     "Seq2SeqTransformer",
     "TransformerConfig",
+    "TransformerTrace",
+    "capture_transformer_trace",
     "get_logger",
     "setup_logging",
 ]
@@ -17,6 +19,7 @@ __version__ = "0.1.0"
 
 if TYPE_CHECKING:
     from miniformer.config.model_config import TransformerConfig
+    from miniformer.inspect import TransformerTrace, capture_transformer_trace
     from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
     from miniformer.model.transformer import Transformer
     from miniformer.utils.logging import get_logger, setup_logging
@@ -38,6 +41,12 @@ def __getattr__(name: str):
 
         globals()[name] = Seq2SeqTransformer
         return Seq2SeqTransformer
+    if name in {"TransformerTrace", "capture_transformer_trace"}:
+        from miniformer.inspect import TransformerTrace, capture_transformer_trace
+
+        globals()["TransformerTrace"] = TransformerTrace
+        globals()["capture_transformer_trace"] = capture_transformer_trace
+        return globals()[name]
     if name in {"get_logger", "setup_logging"}:
         from miniformer.utils.logging import get_logger, setup_logging
 

@@ -183,6 +183,27 @@ class Transformer(nn.Module):
         assert self.encoder is not None, "Transformer.encoder should already be initialized"
         return self.encoder.attn_weights
 
+    def trace(
+        self,
+        x: Union[torch.Tensor, List[Dict[str, Any]], Dict[str, torch.Tensor]],
+        mask: Optional[torch.Tensor] = None,
+        *,
+        top_k: int = 5,
+        compare_cache: bool = False,
+        **kwargs,
+    ):
+        """Capture a structured inspection trace for one encoder-only forward pass."""
+        from miniformer.inspect import capture_transformer_trace
+
+        return capture_transformer_trace(
+            self,
+            x,
+            mask=mask,
+            top_k=top_k,
+            compare_cache=compare_cache,
+            **kwargs,
+        )
+
     def save_pretrained(self, save_dir: str) -> None:
         """Save model and configuration to directory"""
         os.makedirs(save_dir, exist_ok=True)

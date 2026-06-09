@@ -2,7 +2,10 @@
 
 from miniformer.visualization.inspector import (
     AttentionTrace,
+    CacheTrace,
     LayerTrace,
+    LogitTrace,
+    TensorSummary,
     TransformerTrace,
     capture_transformer_trace,
     plot_trace_summary,
@@ -11,7 +14,10 @@ from miniformer.visualization.visualize import plot_attention, visualize_embeddi
 
 __all__ = [
     "AttentionTrace",
+    "CacheTrace",
     "LayerTrace",
+    "LogitTrace",
+    "TensorSummary",
     "TransformerTrace",
     "capture_transformer_trace",
     "plot_attention",

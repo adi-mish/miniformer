@@ -186,6 +186,33 @@ class Seq2SeqTransformer(nn.Module):
 
         return Seq2SeqOutput(dec_out, self_attns, cross_attns)
 
+    def trace(
+        self,
+        src: torch.Tensor,
+        tgt: torch.Tensor,
+        src_mask: Optional[torch.Tensor] = None,
+        tgt_mask: Optional[torch.Tensor] = None,
+        memory_mask: Optional[torch.Tensor] = None,
+        use_causal_mask: bool = True,
+        *,
+        top_k: int = 5,
+        compare_cache: bool = False,
+    ):
+        """Capture a structured inspection trace for one seq2seq forward pass."""
+        from miniformer.inspect import capture_transformer_trace
+
+        return capture_transformer_trace(
+            self,
+            src,
+            tgt,
+            src_mask=src_mask,
+            tgt_mask=tgt_mask,
+            memory_mask=memory_mask,
+            use_causal_mask=use_causal_mask,
+            top_k=top_k,
+            compare_cache=compare_cache,
+        )
+
     @torch.no_grad()
     def generate(
         self,
