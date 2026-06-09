@@ -15,6 +15,7 @@ from miniformer.config.model_config import TransformerConfig
 from miniformer.model.cache import DecoderPastKeyValues
 from miniformer.model.decoder import Decoder
 from miniformer.model.encoder import Encoder  # existing encoder stack
+from miniformer.model.generation import GenerationConfig, sample_next_token
 from miniformer.model.masks import (
     causal_mask,
     combine_masks,
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from miniformer.inspect import TransformerTrace
 
 __all__ = [
+    "GenerationConfig",
     "Seq2SeqModelOutput",
     "Seq2SeqTransformer",
 ]
@@ -140,41 +142,42 @@ class Seq2SeqTransformer(nn.Module):
         top_k: int = 0,
         top_p: float = 1.0,
         use_cache: bool = True,
+        generation_config: Optional[GenerationConfig] = None,
     ) -> torch.Tensor:
         if self.decoder.token_embedding is None:
             raise RuntimeError("generate() is only available in token‑based mode.")
         if self.config.output_mode != "vocab":
             raise RuntimeError("generate() requires output_mode='vocab'")
-        if not isinstance(max_new_tokens, int) or max_new_tokens < 0:
-            raise ValueError("max_new_tokens must be a non-negative integer")
-        for name, token_id in {"bos_token_id": bos_token_id, "eos_token_id": eos_token_id}.items():
-            if not isinstance(token_id, int) or token_id < 0 or token_id >= self.config.vocab_size:
-                raise ValueError(f"{name} must be in [0, vocab_size)")
-        if not isinstance(do_sample, bool):
-            raise TypeError("do_sample must be a boolean")
-        if not isinstance(use_cache, bool):
-            raise TypeError("use_cache must be a boolean")
-        if temperature <= 0:
-            raise ValueError("temperature must be positive")
-        if top_k < 0 or top_k > self.config.vocab_size:
-            raise ValueError("top_k must be in [0, vocab_size]")
-        if top_p <= 0 or top_p > 1:
-            raise ValueError("top_p must be in (0, 1]")
-        if not do_sample and (temperature != 1.0 or top_k != 0 or top_p != 1.0):
-            raise ValueError("temperature, top_k, and top_p require do_sample=True")
+        if generation_config is None:
+            generation_config = GenerationConfig(
+                max_new_tokens=max_new_tokens,
+                bos_token_id=bos_token_id,
+                eos_token_id=eos_token_id,
+                do_sample=do_sample,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                use_cache=use_cache,
+            )
+        generation_config.validate(self.config.vocab_size)
 
         device = src.device
         src_mask = padding_mask(src)
         memory = self.encoder(src, src_mask).hidden_states
-        generated = torch.full((src.size(0), 1), bos_token_id, dtype=torch.long, device=device)
-        if max_new_tokens == 0:
+        generated = torch.full(
+            (src.size(0), 1),
+            generation_config.bos_token_id,
+            dtype=torch.long,
+            device=device,
+        )
+        if generation_config.max_new_tokens == 0:
             return generated[:, 1:]
 
         past_key_values: Optional[DecoderPastKeyValues] = None
         finished = torch.zeros(src.size(0), dtype=torch.bool, device=device)
 
-        for _ in range(max_new_tokens):
-            if use_cache:
+        for _ in range(generation_config.max_new_tokens):
+            if generation_config.use_cache:
                 decoder_output = self.decoder(
                     generated if past_key_values is None else generated[:, -1:],
                     memory,
@@ -197,35 +200,14 @@ class Seq2SeqTransformer(nn.Module):
                 dec_out = decoder_output.output
 
             logits = dec_out[:, -1, :]
-            if do_sample:
-                logits = logits / temperature
-
-                if top_k > 0:
-                    values, _ = torch.topk(logits, top_k)
-                    min_keep = values[:, -1].unsqueeze(-1)
-                    logits = torch.where(logits < min_keep, torch.full_like(logits, -1e4), logits)
-                if top_p < 1.0:
-                    sorted_logits, sorted_idx = torch.sort(logits, descending=True)
-                    cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
-                    sorted_mask = cumulative_probs > top_p
-                    sorted_mask[..., 1:] = sorted_mask[..., :-1].clone()
-                    sorted_mask[..., 0] = False
-                    remove_mask = torch.zeros_like(logits, dtype=torch.bool)
-                    remove_mask.scatter_(dim=-1, index=sorted_idx, src=sorted_mask)
-                    logits = logits.masked_fill(remove_mask, -1e4)
-
-                probs = logits.softmax(dim=-1)
-                next_token = torch.multinomial(probs, num_samples=1)
-            else:
-                next_token = torch.argmax(logits, dim=-1, keepdim=True)
-
+            next_token = sample_next_token(logits, generation_config)
             next_token = torch.where(
                 finished.unsqueeze(1),
-                torch.full_like(next_token, eos_token_id),
+                torch.full_like(next_token, generation_config.eos_token_id),
                 next_token,
             )
             generated = torch.cat((generated, next_token), dim=1)
-            finished = finished | (next_token.squeeze(1) == eos_token_id)
+            finished = finished | (next_token.squeeze(1) == generation_config.eos_token_id)
             if finished.all():
                 break
 

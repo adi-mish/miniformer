@@ -15,6 +15,9 @@ __all__ = [
     "TransformerTrace",
     "capture_transformer_trace",
     "save_trace_html",
+    "GenerationConfig",
+    "filter_logits_for_sampling",
+    "sample_next_token",
     "Batch",
     "BatchKind",
     "TextTokenizer",
@@ -48,6 +51,11 @@ if TYPE_CHECKING:
         ensure_tokenizer,
     )
     from miniformer.inspect import TransformerTrace, capture_transformer_trace, save_trace_html
+    from miniformer.model.generation import (
+        GenerationConfig,
+        filter_logits_for_sampling,
+        sample_next_token,
+    )
     from miniformer.model.outputs import Seq2SeqModelOutput, TransformerModelOutput
     from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
     from miniformer.model.transformer import Transformer
@@ -86,6 +94,17 @@ def __getattr__(name: str):
         globals()["TransformerTrace"] = TransformerTrace
         globals()["capture_transformer_trace"] = capture_transformer_trace
         globals()["save_trace_html"] = save_trace_html
+        return globals()[name]
+    if name in {"GenerationConfig", "filter_logits_for_sampling", "sample_next_token"}:
+        from miniformer.model.generation import (
+            GenerationConfig,
+            filter_logits_for_sampling,
+            sample_next_token,
+        )
+
+        globals()["GenerationConfig"] = GenerationConfig
+        globals()["filter_logits_for_sampling"] = filter_logits_for_sampling
+        globals()["sample_next_token"] = sample_next_token
         return globals()[name]
     if name in {
         "Batch",

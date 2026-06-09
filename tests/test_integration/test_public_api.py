@@ -46,6 +46,11 @@ def test_top_level_exports_models_and_trace_helpers(tmp_path):
     trace = miniformer.capture_transformer_trace(model, input_ids, top_k=2)
     html_path = tmp_path / "trace.html"
     miniformer.save_trace_html(trace, html_path, tokens=["1", "2", "3"])
+    next_token = miniformer.sample_next_token(
+        torch.tensor([[0.0, 2.0, 1.0]]),
+        miniformer.GenerationConfig(),
+    )
 
     assert trace.output_shape == (1, 3, 32)
     assert "Miniformer Trace" in html_path.read_text()
+    assert next_token.tolist() == [[1]]

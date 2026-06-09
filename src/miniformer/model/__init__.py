@@ -3,6 +3,11 @@ from miniformer.model.cache import DecoderLayerCache, KeyValueCache
 from miniformer.model.decoder import DecoderOutput
 from miniformer.model.embedding import PositionalEncoding, TokenEmbedding
 from miniformer.model.feedforward import FeedForward
+from miniformer.model.generation import (
+    GenerationConfig,
+    filter_logits_for_sampling,
+    sample_next_token,
+)
 from miniformer.model.masks import (
     causal_mask,
     combine_masks,
@@ -22,10 +27,13 @@ __all__ = [
     "DecoderOutput",
     "KeyValueCache",
     "DecoderLayerCache",
+    "GenerationConfig",
     "MultiHeadAttention",
     "TokenEmbedding",
     "PositionalEncoding",
     "FeedForward",
+    "filter_logits_for_sampling",
+    "sample_next_token",
     "padding_mask",
     "causal_mask",
     "combine_masks",

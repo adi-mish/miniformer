@@ -2,6 +2,11 @@ import pytest
 import torch
 
 from miniformer.model.cache import KeyValueCache
+from miniformer.model.generation import (
+    GenerationConfig,
+    filter_logits_for_sampling,
+    sample_next_token,
+)
 from miniformer.model.outputs import TransformerModelOutput
 from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
 from miniformer.model.transformer import Transformer, TransformerConfig
@@ -138,6 +143,26 @@ def test_seq2seq_generate_greedy_is_deterministic():
     assert torch.equal(first, second)
 
 
+def test_seq2seq_generate_accepts_generation_config():
+    config = TransformerConfig(
+        vocab_size=40,
+        d_model=16,
+        n_heads=4,
+        n_layers=1,
+        d_ff=32,
+        dropout=0.0,
+        output_mode="vocab",
+    )
+    model = Seq2SeqTransformer(config).eval()
+    src = torch.randint(3, config.vocab_size, (2, 5))
+    generation_config = GenerationConfig(max_new_tokens=3, eos_token_id=0, use_cache=False)
+
+    with torch.no_grad():
+        generated = model.generate(src, generation_config=generation_config)
+
+    assert generated.shape == (2, 3)
+
+
 def test_seq2seq_generate_cached_and_uncached_greedy_match():
     config = TransformerConfig(
         vocab_size=40,
@@ -210,3 +235,48 @@ def test_seq2seq_generate_validates_arguments(kwargs, match):
 
     with pytest.raises((TypeError, ValueError), match=match):
         model.generate(src, **kwargs)
+
+
+def test_generation_config_validates_token_ids_against_vocab():
+    with pytest.raises(ValueError, match="eos_token_id"):
+        GenerationConfig(eos_token_id=10).validate(vocab_size=10)
+
+
+def test_sample_next_token_uses_greedy_argmax():
+    logits = torch.tensor([[0.1, 0.5, 0.4], [3.0, 1.0, 2.0]])
+
+    next_token = sample_next_token(logits, GenerationConfig())
+
+    assert next_token.tolist() == [[1], [0]]
+
+
+def test_sample_next_token_rejects_nonfinite_logits():
+    logits = torch.tensor([[0.1, float("inf"), 0.4]])
+
+    with pytest.raises(ValueError, match="finite"):
+        sample_next_token(logits, GenerationConfig())
+
+
+def test_filter_logits_for_sampling_applies_top_k():
+    logits = torch.tensor([[0.0, 3.0, 2.0, -1.0]])
+    config = GenerationConfig(do_sample=True, top_k=2)
+
+    filtered = filter_logits_for_sampling(logits, config)
+    fill_value = torch.finfo(filtered.dtype).min
+
+    assert torch.equal(filtered[0, 1:3], logits[0, 1:3])
+    assert filtered[0, 0].item() == fill_value
+    assert filtered[0, 3].item() == fill_value
+
+
+def test_filter_logits_for_sampling_applies_top_p():
+    logits = torch.tensor([[4.0, 3.0, 1.0, 0.0]])
+    config = GenerationConfig(do_sample=True, top_p=0.6)
+
+    filtered = filter_logits_for_sampling(logits, config)
+    fill_value = torch.finfo(filtered.dtype).min
+
+    assert filtered[0, 0].item() == pytest.approx(4.0)
+    assert filtered[0, 1].item() == fill_value
+    assert filtered[0, 2].item() == fill_value
+    assert filtered[0, 3].item() == fill_value
