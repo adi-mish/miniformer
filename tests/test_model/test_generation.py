@@ -99,6 +99,7 @@ def test_generation_with_eos_token():
         for _ in range(max_new_tokens):
             logits = model(generated)
             next_token = torch.argmax(logits[:, -1, :], dim=-1, keepdim=True)
+            generated = torch.cat([generated, next_token], dim=1)
             if next_token.item() == eos_token_id:
                 break
     

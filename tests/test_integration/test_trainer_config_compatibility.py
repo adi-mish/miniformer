@@ -87,71 +87,32 @@ class TestTrainerConfigCompatibility:
             
             # Initialize model and perform forward/backward pass
             model = MiniFormerLitModule(cfg)
-            
-            # Create a class method to handle mocking
-            orig_model = model.model
-            mock_output = torch.randn(2, 3, requires_grad=True)
-            
-            # Create a mock model class with the same interface
-            class MockModel(Transformer):
-                def __init__(self, original_model):
-                    # Initialize with the same configuration as the original model
-                    if hasattr(original_model, 'config'):
-                        super().__init__(original_model.config)
-                    else:
-                        # Create a minimal config if needed
-                        default_config = TransformerConfig(
-                            vocab_size=100, d_model=16, n_heads=2, n_layers=1)
-                        super().__init__(default_config)
-                    self.original_model = original_model
-                
-                def __call__(self, *args, **kwargs):
-                    return mock_output
-                    
-                # Pass through any attribute access to the original model
-                def __getattr__(self, name):
-                    return getattr(self.original_model, name)
-            
-            # Replace the model with our mock
-            model.model = MockModel(orig_model)
-            
-            try:
-                # Manual training step to test gradient clipping
-                optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-                optimizer.zero_grad()
-                
-                # Forward pass
-                outputs = model.model(batch)
-                loss = torch.nn.functional.cross_entropy(
-                    outputs, torch.tensor([0, 1], dtype=torch.long))
-                
-                # Backward pass
-                loss.backward()
-                
-                # Check gradients before clipping
-                grad_norms_before = [
-                    param.grad.norm().item() 
+
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+            optimizer.zero_grad()
+
+            loss = model.training_step(batch, 0)
+            loss.backward()
+
+            grad_norms_before = [
+                param.grad.norm().item()
+                for param in model.parameters()
+                if param.grad is not None
+            ]
+            assert grad_norms_before, "Expected at least one model parameter to receive gradients"
+
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_val)
+
+            total_norm_after = torch.linalg.vector_norm(
+                torch.stack([
+                    param.grad.detach().norm()
                     for param in model.parameters()
                     if param.grad is not None
-                ]
-                
-                # Apply gradient clipping
-                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_val)
-                
-                # Check gradients after clipping
-                grad_norms_after = [
-                    param.grad.norm().item() 
-                    for param in model.parameters()
-                    if param.grad is not None
-                ]
-                
-                # Verify clipping works - max gradient norm should not exceed clip value (with small tolerance)
-                if max(grad_norms_before) > clip_val:  # Only if clipping was actually needed
-                    assert max(grad_norms_after) <= clip_val + 1e-5, \
-                        f"Gradient norm {max(grad_norms_after)} exceeds clip value {clip_val}"
-            finally:
-                # Restore original model
-                model.model = orig_model
+                ])
+            ).item()
+
+            assert total_norm_after <= clip_val + 1e-5, \
+                f"Gradient norm {total_norm_after} exceeds clip value {clip_val}"
     
     def test_precision_compatibility(self):
         """Test model compatibility with different precision settings."""

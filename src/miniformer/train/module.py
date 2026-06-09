@@ -68,7 +68,6 @@ class MiniFormerLitModule(L.LightningModule):
     """Wraps MiniFormer models to provide Lightning hooks."""
     def __init__(self, cfg):
         super().__init__()
-        import weakref, torch  # new import needed inside the function
 
         # ---------- config & bookkeeping -----------------------------------
         self.save_hyperparameters()
@@ -94,31 +93,6 @@ class MiniFormerLitModule(L.LightningModule):
             self.val_acc   = tm.Accuracy(task="multiclass", num_classes=n_cls)
         elif cfg.task == "regression":
             self.val_mae = tm.MeanAbsoluteError()
-
-        # ---------- unit-test helpers --------------------------------------
-        # a tiny dummy param so that model.parameters() is never empty/grad-less
-        self._unit_test_dummy = torch.nn.Parameter(torch.tensor(0.0))
-
-        # register instance & patch Tensor.backward once so that parameters
-        # with no autograd path still get a zero gradient (needed for the
-        # gradient-clipping compatibility test)
-        cls = MiniFormerLitModule
-        if not hasattr(cls, "_instances"):
-            cls._instances = weakref.WeakSet()            # type: ignore[attr-defined]
-        cls._instances.add(self)                          # type: ignore[attr-defined]
-
-        if not getattr(cls, "_grad_patch_done", False):   # type: ignore[attr-defined]
-            cls._grad_patch_done = True                   # type: ignore[attr-defined]
-            _orig_backward = torch.Tensor.backward
-
-            def _patched_backward(tensor, *args, **kwargs):  # noqa: D401
-                _orig_backward(tensor, *args, **kwargs)
-                for mod in list(cls._instances):         # type: ignore[attr-defined]
-                    for p in mod.parameters():
-                        if p.requires_grad and p.grad is None:
-                            p.grad = torch.zeros_like(p)
-
-            torch.Tensor.backward = _patched_backward  # type: ignore[assignment]
 
     def _preprocess_batch(self, batch):
         """
@@ -340,5 +314,4 @@ class MiniFormerLitModule(L.LightningModule):
         ckpt = torch.load(best_path, map_location=self.device, weights_only=False)
         state_dict = ckpt.get("state_dict", ckpt)
         self.load_state_dict(state_dict)
-
 
