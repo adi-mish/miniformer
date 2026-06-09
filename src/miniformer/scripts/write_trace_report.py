@@ -24,12 +24,20 @@ def write_trace_report(
     d_ff: int = 32,
     top_k: int = 3,
     compare_cache: bool = True,
+    include_raw_attention: bool = True,
+    include_logits: bool = True,
+    max_report_tokens: int = 64,
+    max_report_heads: int = 8,
 ) -> Path:
     """Write a deterministic static HTML report for a tiny causal transformer."""
     if seq_len <= 0:
         raise ValueError("seq_len must be positive")
     if top_k <= 0:
         raise ValueError("top_k must be positive")
+    if max_report_tokens <= 0:
+        raise ValueError("max_report_tokens must be positive")
+    if max_report_heads <= 0:
+        raise ValueError("max_report_heads must be positive")
 
     torch.manual_seed(seed)
     model = Transformer(
@@ -54,12 +62,21 @@ def write_trace_report(
         input_ids,
         top_k=top_k,
         compare_cache=compare_cache,
+        include_raw_attention=include_raw_attention,
+        include_logits=include_logits,
+        max_report_tokens=max_report_tokens,
+        max_report_heads=max_report_heads,
     )
     tokens = [str(token_id) for token_id in input_ids[0].tolist()]
 
     html_path = Path(output_html)
     html_path.parent.mkdir(parents=True, exist_ok=True)
-    trace.to_html(html_path, tokens=tokens)
+    trace.to_html(
+        html_path,
+        tokens=tokens,
+        max_tokens=max_report_tokens,
+        max_heads=max_report_heads,
+    )
 
     if output_json is not None:
         json_path = Path(output_json)
@@ -82,6 +99,10 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--d-ff", type=int, default=32)
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--no-cache-compare", action="store_true")
+    parser.add_argument("--no-raw-attention", action="store_true")
+    parser.add_argument("--no-logits", action="store_true")
+    parser.add_argument("--max-report-tokens", type=int, default=64)
+    parser.add_argument("--max-report-heads", type=int, default=8)
     return parser.parse_args(argv)
 
 
@@ -99,6 +120,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         d_ff=args.d_ff,
         top_k=args.top_k,
         compare_cache=not args.no_cache_compare,
+        include_raw_attention=not args.no_raw_attention,
+        include_logits=not args.no_logits,
+        max_report_tokens=args.max_report_tokens,
+        max_report_heads=args.max_report_heads,
     )
     print(f"trace_html={path}")
     return 0

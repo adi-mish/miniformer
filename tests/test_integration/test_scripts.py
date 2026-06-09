@@ -74,6 +74,9 @@ def test_trace_report_script_writes_static_artifacts(tmp_path):
     payload = json.loads(json_path.read_text())
     assert payload["output_shape"] == [1, 4, 64]
     assert payload["cache"]["attempted"] is True
+    assert payload["metadata"]["include_raw_attention"] is True
+    assert payload["metadata"]["include_logits"] is True
+    assert payload["attentions"][0]["weights"] is not None
 
 
 def test_check_script_lists_available_checks():

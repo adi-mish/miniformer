@@ -289,7 +289,9 @@ records with `miniformer.data.preprocessing` or `MiniFormerDataModule` before
 calling `Transformer.forward`, `Seq2SeqTransformer.forward`, or `MiniFormerModule`.
 
 `generate()` is greedy by default. Set `do_sample=True` to use `temperature`,
-`top_k`, or `top_p` sampling.
+`top_k`, or `top_p` sampling. For reusable decoding settings, pass a
+`GenerationConfig`; the model delegates token selection to tested sampling
+helpers instead of carrying ad hoc generation logic in the model body.
 
 ---
 
@@ -305,6 +307,10 @@ The current public contracts are intentionally strict:
 - Generation requires token models with `output_mode="vocab"`.
 - Position behavior is explicit. Use `position_mode="learned"`, `"rope"`, or
   `"learned+rope"` with the matching `rotary_pct` setting.
+- Serialized `TransformerConfig` payloads include `schema_version`. Loaders
+  reject unknown keys by default; use `migrate_config_dict(...)` for old config
+  dictionaries and `allow_unknown=True` only when intentionally dropping stale
+  fields.
 - The training wrapper is deliberately small. It moves tensor batches to the
   device, calls the model, computes task losses, and does not tokenize text.
 - Classification and regression use explicit supervised pooling. The default is
@@ -342,7 +348,14 @@ model = Transformer(
 )
 input_ids = torch.randint(1, 1000, (2, 16))
 
-trace = capture_transformer_trace(model, input_ids, top_k=5, compare_cache=True)
+trace = capture_transformer_trace(
+    model,
+    input_ids,
+    top_k=5,
+    compare_cache=True,
+    include_raw_attention=False,
+    include_logits=True,
+)
 print(trace.output_shape)
 print(trace.layers[0].mlp_activation_norm)
 print(trace.attentions[0].entropy)
@@ -359,12 +372,18 @@ You can also call `model.trace(input_ids)` or `seq2seq_model.trace(src_ids, tgt_
 Traces include per-token residual norm evolution, self-attention and cross-attention
 output norms, per-head attention entropy, Q/K/V projection summaries, MLP
 activation/output summaries, top-k logit evolution by token when the output is
-logit-like, raw attention heatmaps when attention weights are available, and
-optional cached-vs-uncached consistency metadata. `trace.to_html(...)` and
-`save_trace_html(trace, ...)` write a self-contained static report that opens
-directly in a browser.
+logit-like, and optional cached-vs-uncached consistency metadata.
+`trace.to_html(...)` and `save_trace_html(trace, ...)` write a self-contained
+static report that opens directly in a browser.
 
-The old `miniformer.visualization.capture_transformer_trace` import path still works, but `miniformer.inspect` is the canonical API. For raw attention heatmaps, use `plot_attention(model.get_attention_weights(input_ids))`. Raw attention tensors are only available when `use_sdpa=False`; PyTorch's SDPA path does not return attention weights, so the trace marks those attention summaries as unavailable instead of pretending weights exist.
+Raw attention heatmaps are not stored by default. Use
+`include_raw_attention=True` with `use_sdpa=False` to serialize bounded raw
+attention maps; `max_report_tokens` and `max_report_heads` prevent accidental
+huge reports. Use `include_logits=False` when top-k logit traces would be too
+large or irrelevant. PyTorch's SDPA path does not return attention weights, so
+the trace marks those attention summaries as unavailable instead of pretending
+weights exist. The old `miniformer.visualization.capture_transformer_trace`
+import path still works, but `miniformer.inspect` is the canonical API.
 
 ---
 
@@ -406,12 +425,13 @@ mask = batch["attention_mask"]  # BoolTensor [batch, seq_len]
 labels = batch["labels"]       # LongTensor [batch]
 ```
 
-For language modeling, you'll need a tokenizer. The trainer's CLI tries to load
-GPT-2's tokenizer from HuggingFace by default, but library code only requires an
-object with an `encode(text, add_special_tokens=True)` method. For supervised
-string inputs, `collate_records` can use that tokenizer or a deterministic
-hash-based fallback. Numeric feature records are padded into `batch["input"]`
-float tensors.
+For text tasks, Miniformer uses a tiny `TokenizerProtocol`:
+`encode(text, add_special_tokens=True)`. The trainer's CLI tries to load GPT-2's
+tokenizer from HuggingFace when `miniformer[tokenizers]` is installed, otherwise
+library preprocessing can use the deterministic `WhitespaceHashTokenizer`
+fallback. Language modeling and supervised text preprocessing use the same
+interface. Numeric feature records are padded into `batch["input"]` float
+tensors.
 
 Use `miniformer-validate-jsonl` or `miniformer.data.validate_jsonl(...)` to catch
 schema issues, empty strings, label dtype problems, excessive sequence lengths,
@@ -484,6 +504,11 @@ config = TransformerConfig(
     causal=False             # Set True for autoregressive token modeling
 )
 ```
+
+`config.save_json(...)` writes the current schema version. Use
+`TransformerConfig.from_json(...)` or `TransformerConfig.from_dict(...)` for
+strict loading; unknown serialized keys are rejected unless `allow_unknown=True`
+is supplied explicitly.
 
 ### Training Configuration
 
@@ -678,7 +703,7 @@ Some things I haven't gotten to yet:
 
 - Direct FlashAttention 2 integration is not implemented; use PyTorch SDPA via `use_sdpa=True` where supported
 - Generation with very long sequences can be slow without FlashAttention
-- The trainer CLI defaults to HuggingFace GPT-2 tokenization for language modeling when `miniformer[tokenizers]` is installed; custom tokenizers should provide `encode(text, add_special_tokens=True)`
+- The trainer CLI defaults to HuggingFace GPT-2 tokenization for language modeling when `miniformer[tokenizers]` is installed; otherwise it can fall back to `WhitespaceHashTokenizer`. Custom tokenizers should implement `TokenizerProtocol`.
 
 ---
 
