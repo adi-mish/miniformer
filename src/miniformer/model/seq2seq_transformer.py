@@ -12,7 +12,8 @@ import torch
 import torch.nn as nn
 
 from miniformer.config.model_config import TransformerConfig
-from miniformer.model.decoder import Decoder, DecoderPastKeyValues
+from miniformer.model.cache import DecoderPastKeyValues
+from miniformer.model.decoder import Decoder
 from miniformer.model.encoder import Encoder  # existing encoder stack
 from miniformer.model.masks import (
     causal_mask,
@@ -80,7 +81,7 @@ class Seq2SeqTransformer(nn.Module):
             memory_mask = src_mask
 
         # ── encode ─────────────────────────────────────────────────────
-        memory = self.encoder(src, src_mask)
+        memory = self.encoder(src, src_mask).hidden_states
 
         # ── decode ─────────────────────────────────────────────────────
         decoder_output = self.decoder(
@@ -147,7 +148,7 @@ class Seq2SeqTransformer(nn.Module):
 
         device = src.device
         src_mask = padding_mask(src)
-        memory = self.encoder(src, src_mask)
+        memory = self.encoder(src, src_mask).hidden_states
         generated = torch.full((src.size(0), 1), bos_token_id, dtype=torch.long, device=device)
 
         # Implement caching for faster generation

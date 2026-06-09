@@ -16,6 +16,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from miniformer.model.cache import KeyValueCache
 from miniformer.model.masks import validate_attention_mask
 
 
@@ -102,28 +103,34 @@ class MultiHeadAttention(nn.Module):
         k: torch.Tensor,
         v: torch.Tensor,
         mask: Optional[torch.Tensor] = None,  # broadcastable to [B, heads, L, S]
-        past_kv: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        past_kv: Optional[KeyValueCache] = None,
         use_cache: bool = False,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+        static_kv: bool = False,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[KeyValueCache]]:
         """Return (output, attn, new_kv) where *new_kv* is None unless use_cache=True."""
         B, L, _ = q.shape
 
-        # project & reshape --------------------------------------------------
+        # project query ------------------------------------------------------
         q = self.wq(q).view(B, L, self.n_heads, self.d_k).transpose(1, 2)  # [B, H, L, D]
-        k = self.wk(k).view(B, -1, self.n_heads, self.d_k).transpose(1, 2)
-        v = self.wv(v).view(B, -1, self.n_heads, self.d_k).transpose(1, 2)
 
-        # RoPE --------------------------------------------------------------
-        past_len = past_kv[0].shape[2] if past_kv is not None else 0
+        past_len = 0 if static_kv else (past_kv.key.shape[2] if past_kv is not None else 0)
         if self.rotary_dim > 0:
             q = self._rope(q, offset=past_len)
-            k = self._rope(k, offset=past_len)
 
-        # kv‑cache concat ----------------------------------------------------
-        if past_kv is not None:
-            pk, pv = past_kv
-            k = torch.cat([pk, k], dim=2)  # time dim = 2 after transpose
-            v = torch.cat([pv, v], dim=2)
+        # project/reuse keys and values -------------------------------------
+        if static_kv and past_kv is not None:
+            k = past_kv.key
+            v = past_kv.value
+        else:
+            k = self.wk(k).view(B, -1, self.n_heads, self.d_k).transpose(1, 2)
+            v = self.wv(v).view(B, -1, self.n_heads, self.d_k).transpose(1, 2)
+
+            if self.rotary_dim > 0:
+                k = self._rope(k, offset=past_len)
+
+            if past_kv is not None and not static_kv:
+                k = torch.cat([past_kv.key, k], dim=2)  # time dim = 2 after transpose
+                v = torch.cat([past_kv.value, v], dim=2)
 
         if mask is not None:
             mask = validate_attention_mask(
@@ -154,5 +161,5 @@ class MultiHeadAttention(nn.Module):
         out = out.contiguous().view(B, L, self.d_model)
         out = self.wo(out)
 
-        new_kv = (k, v) if use_cache else None
+        new_kv = KeyValueCache(key=k, value=v) if use_cache else None
         return out, attn, new_kv

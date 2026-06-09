@@ -7,9 +7,10 @@ import torch
 import torch.nn as nn
 
 from miniformer.config.model_config import TransformerConfig
+from miniformer.model.cache import EncoderPastKeyValues
 from miniformer.model.encoder import Encoder
 from miniformer.model.initialization import init_transformer_module
-from miniformer.model.masks import padding_mask, self_attention_mask
+from miniformer.model.masks import causal_mask, padding_mask, self_attention_mask
 from miniformer.model.outputs import TransformerModelOutput
 from miniformer.utils.tokenization import stable_token_id
 
@@ -68,25 +69,11 @@ class Transformer(nn.Module):
         x: Union[torch.Tensor, List[Dict[str, Any]], Dict[str, torch.Tensor]],
         mask: Optional[torch.Tensor] = None,
         *,  # make the cache args keyword-only
-        past_key_values: Optional[torch.Tensor] = None,
+        past_key_values: Optional[EncoderPastKeyValues] = None,
         use_cache: bool = False,
         **kwargs,
     ) -> TransformerModelOutput:
-        """
-        Standard path (``use_cache=False``)
-        -----------------------------------
-        Returns the full sequence projection, exactly like before.
-
-        Simple sequence-level cache (``use_cache=True``)
-        ------------------------------------------------
-        We keep the *already-seen token ids* as ``past_key_values``.
-        On each call we prepend them to the newly provided tokens, run the
-        encoder once, and then return **only** the projection for the fresh
-        tokens together with the updated cache.
-
-        This "whole-sequence" trick is slower than true KV caching but is
-        easy to reason about and keeps the encoder internals simple.
-        """
+        """Run the encoder-only transformer with optional causal KV caching."""
         # Handle non-tensor inputs (batches that are lists/dicts)
         if not isinstance(x, torch.Tensor):
             # For raw batch inputs during inference
@@ -118,29 +105,38 @@ class Transformer(nn.Module):
                     "'input_ids' or 'input', or a dict with 'input_ids'"
                 )
 
-        # ----- stitch the full sequence when caching ------------------------
+        past_len = 0
         if use_cache:
-            if self.token_embedding is None:
-                raise RuntimeError("Caching is only implemented for token-based mode.")
-            if past_key_values is not None:
-                x_full = torch.cat([past_key_values, x], dim=1)  # [B, S_prev+S_new]
-            else:
-                x_full = x
-            new_past = x_full.detach()  # store *token ids* as the cache
-        else:
-            x_full = x
-            new_past = None
+            if not self.config.causal:
+                raise RuntimeError("KV caching requires causal=True")
+            if mask is not None:
+                raise ValueError("custom masks are not supported with cached encoder decoding")
+            if x.dim() == 2 and x.dtype == torch.long and (x == self.pad_id).any():
+                raise ValueError("cached encoder decoding does not support padding tokens")
+            if past_key_values is not None and len(past_key_values) > 0:
+                first_past = past_key_values[0]
+                if first_past is not None:
+                    past_len = first_past.key.size(2)
 
         # ----- build / reuse the attention mask -----------------------------
         if mask is None:
-            mask = self._build_mask(x_full)
+            if use_cache:
+                mask = causal_mask(x.size(1), past_len=past_len, device=x.device)
+            else:
+                mask = self._build_mask(x)
 
         # ----- run encoder --------------------------------------------------
         if self.encoder is None:
             raise RuntimeError(
                 "Encoder is not initialized properly. Check the Encoder class and configuration."
             )
-        h_full = self.encoder(x_full, mask)  # [B, S_total, d_model]
+        encoder_output = self.encoder(
+            x,
+            mask,
+            past_key_values=past_key_values,
+            use_cache=use_cache,
+        )
+        h_full = encoder_output.hidden_states  # [B, S, d_model]
 
         # ----- explicit output head -----------------------------------------
         if getattr(self, "_tied_weights", False) and self.token_embedding is not None:
@@ -148,18 +144,12 @@ class Transformer(nn.Module):
         else:
             out_full = self.output_projection(h_full)
 
-        if use_cache:
-            out = out_full[:, -x.size(1) :, :].contiguous()
-            assert new_past is not None
-        else:
-            out = out_full
-
         return TransformerModelOutput(
-            logits=out if self.config.output_mode == "vocab" else None,
-            hidden_states=out if self.config.output_mode == "hidden" else None,
-            projection=out if self.config.output_mode == "projection" else None,
-            self_attentions=self.encoder.attn_weights,
-            past_key_values=new_past,
+            logits=out_full if self.config.output_mode == "vocab" else None,
+            hidden_states=out_full if self.config.output_mode == "hidden" else None,
+            projection=out_full if self.config.output_mode == "projection" else None,
+            self_attentions=encoder_output.self_attentions,
+            past_key_values=encoder_output.past_key_values,
         )
 
     def _create_mask(self, x):

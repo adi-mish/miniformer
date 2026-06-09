@@ -250,13 +250,21 @@ def _compare_encoder_cache(
             rtol=rtol,
             reason="encoder cache comparison is only available for token models",
         )
+    if (input_ids == 0).any():
+        return CacheTrace(
+            attempted=True,
+            supported=False,
+            atol=atol,
+            rtol=rtol,
+            reason="encoder cache comparison does not support padding tokens",
+        )
     if model_kwargs.get("mask") is not None:
         return CacheTrace(
             attempted=True,
             supported=False,
             atol=atol,
             rtol=rtol,
-            reason="custom masks are not replayed by the cache comparison probe",
+            reason="custom masks are not supported by the cache comparison probe",
         )
 
     full = model(input_ids, use_cache=False)
@@ -318,7 +326,7 @@ def _compare_seq2seq_cache(
             supported=False,
             atol=atol,
             rtol=rtol,
-            reason="target padding is not replayed by the cache comparison probe",
+            reason="target padding is not supported by the cache comparison probe",
         )
     if any(model_kwargs.get(key) is not None for key in ("src_mask", "tgt_mask", "memory_mask")):
         return CacheTrace(
@@ -326,7 +334,7 @@ def _compare_seq2seq_cache(
             supported=False,
             atol=atol,
             rtol=rtol,
-            reason="custom masks are not replayed by the cache comparison probe",
+            reason="custom masks are not supported by the cache comparison probe",
         )
     if not model_kwargs.get("use_causal_mask", True):
         return CacheTrace(
@@ -350,7 +358,7 @@ def _compare_seq2seq_cache(
 
     src_mask = padding_mask(src)
     model_any = cast(Any, model)
-    memory = model_any.encoder(src, src_mask)
+    memory = model_any.encoder(src, src_mask).hidden_states
 
     past_key_values = None
     cached_outputs: list[torch.Tensor] = []

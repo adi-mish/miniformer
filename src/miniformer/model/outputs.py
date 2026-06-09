@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 import torch
 
-from miniformer.model.decoder import AttentionList, DecoderPastKeyValues
+from miniformer.model.cache import AttentionList, DecoderPastKeyValues, EncoderPastKeyValues
 
 
 @dataclass(frozen=True)
@@ -16,7 +16,7 @@ class TransformerModelOutput:
     hidden_states: Optional[torch.Tensor] = None
     projection: Optional[torch.Tensor] = None
     self_attentions: Optional[AttentionList] = None
-    past_key_values: Optional[Any] = None
+    past_key_values: Optional[EncoderPastKeyValues] = None
 
     @property
     def output(self) -> torch.Tensor:

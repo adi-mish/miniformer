@@ -8,6 +8,7 @@ import torch.nn as nn
 
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.attention import MultiHeadAttention
+from miniformer.model.cache import AttentionList, EncoderPastKeyValues, KeyValueCache
 from miniformer.model.feedforward import FeedForward
 from miniformer.model.initialization import init_transformer_module
 
@@ -18,6 +19,20 @@ class EncoderLayerOutput:
 
     hidden_states: torch.Tensor
     self_attention: Optional[torch.Tensor]
+    key_values: Optional[KeyValueCache] = None
+
+
+@dataclass(frozen=True)
+class EncoderOutput:
+    """Explicit encoder stack output."""
+
+    hidden_states: torch.Tensor
+    self_attentions: AttentionList
+    past_key_values: Optional[EncoderPastKeyValues] = None
+
+    @property
+    def output(self) -> torch.Tensor:
+        return self.hidden_states
 
 
 class EncoderLayer(nn.Module):
@@ -51,13 +66,17 @@ class EncoderLayer(nn.Module):
         self,
         x: torch.Tensor,
         mask: Optional[torch.Tensor] = None,
+        past_key_value: Optional[KeyValueCache] = None,
+        use_cache: bool = False,
     ) -> EncoderLayerOutput:
         """Run one encoder layer."""
 
         # ── self-attention ────────────────────────────────────────────────
         residual = x
         x_ = self.norm1(x) if self.pre_norm else x
-        sa_out, attn, _ = self.self_attention(x_, x_, x_, mask)
+        sa_out, attn, new_key_values = self.self_attention(
+            x_, x_, x_, mask, past_key_value, use_cache
+        )
         x = residual + self.dropout(sa_out)
         if not self.pre_norm:
             x = self.norm1(x)
@@ -70,7 +89,11 @@ class EncoderLayer(nn.Module):
         if not self.pre_norm:
             x = self.norm2(x)
 
-        return EncoderLayerOutput(hidden_states=x, self_attention=attn)
+        return EncoderLayerOutput(
+            hidden_states=x,
+            self_attention=attn,
+            key_values=new_key_values,
+        )
 
 
 class Encoder(nn.Module):
@@ -114,12 +137,22 @@ class Encoder(nn.Module):
         self,
         x: torch.Tensor,  # [B, S] int or [B, S, feat]
         mask: Optional[torch.Tensor] = None,  # broadcastable to [B, 1, 1, S]
-    ) -> torch.Tensor:
+        *,
+        past_key_values: Optional[EncoderPastKeyValues] = None,
+        use_cache: bool = False,
+    ) -> EncoderOutput:
 
         B, S = x.size(0), x.size(1)
         device = x.device
-        if S > self.config.max_seq_len:
-            raise ValueError(f"Sequence length {S} exceeds max_seq_len={self.config.max_seq_len}")
+        past_len = 0
+        if past_key_values is not None and len(past_key_values) > 0:
+            first_past = past_key_values[0]
+            if first_past is not None:
+                past_len = first_past.key.size(2)
+        if past_len + S > self.config.max_seq_len:
+            raise ValueError(
+                f"Sequence length {past_len + S} exceeds max_seq_len={self.config.max_seq_len}"
+            )
 
         # input ↦ d_model
         if self.token_embedding is not None:
@@ -133,15 +166,31 @@ class Encoder(nn.Module):
 
         # add positions
         if self.pos_embedding is not None:
-            positions = torch.arange(S, device=device).unsqueeze(0).expand(B, S)
+            positions = (
+                torch.arange(past_len, past_len + S, device=device).unsqueeze(0).expand(B, S)
+            )
             x = x + self.pos_embedding(positions)
         x = self.dropout(x)
 
         # run blocks
         self.attn_weights = []
-        for layer in self.layers:
-            layer_output = layer(x, mask)
+        if past_key_values is None:
+            past_key_values = [None for _ in range(len(self.layers))]
+        new_past_key_values: EncoderPastKeyValues = []
+        for index, layer in enumerate(self.layers):
+            layer_output = layer(
+                x,
+                mask,
+                past_key_value=past_key_values[index],
+                use_cache=use_cache,
+            )
             x = layer_output.hidden_states
             self.attn_weights.append(layer_output.self_attention)
+            if use_cache:
+                new_past_key_values.append(layer_output.key_values)
 
-        return x
+        return EncoderOutput(
+            hidden_states=x,
+            self_attentions=self.attn_weights,
+            past_key_values=new_past_key_values if use_cache else None,
+        )

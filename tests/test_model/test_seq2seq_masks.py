@@ -118,7 +118,7 @@ def test_decoder_cache_matches_full_pass_for_chunked_targets():
     src_mask = padding_mask(src)
 
     with torch.no_grad():
-        memory = model.encoder(src, src_mask)
+        memory = model.encoder(src, src_mask).hidden_states
         full_decoder_output = model.decoder(
             tgt,
             memory,
@@ -145,6 +145,61 @@ def test_decoder_cache_matches_full_pass_for_chunked_targets():
 
     cached_out = torch.cat(cached_chunks, dim=1)
     assert torch.allclose(full_out, cached_out, atol=1e-5)
+
+
+def test_decoder_cross_attention_cache_reuses_memory_projections():
+    config = TransformerConfig(
+        vocab_size=64,
+        d_model=32,
+        n_heads=4,
+        n_layers=2,
+        d_ff=64,
+        dropout=0.0,
+        output_mode="vocab",
+    )
+    model = Seq2SeqTransformer(config).eval()
+
+    key_projection_calls = [0 for _ in model.decoder.layers]
+    for index, layer in enumerate(model.decoder.layers):
+        original_forward = layer.cross_attention.wk.forward
+
+        def counted_forward(x, *, original_forward=original_forward, index=index):
+            key_projection_calls[index] += 1
+            return original_forward(x)
+
+        layer.cross_attention.wk.forward = counted_forward
+
+    src = torch.randint(1, config.vocab_size, (2, 5))
+    tgt = torch.randint(1, config.vocab_size, (2, 4))
+    src_mask = padding_mask(src)
+
+    with torch.no_grad():
+        memory = model.encoder(src, src_mask).hidden_states
+        first = model.decoder(
+            tgt[:, :2],
+            memory,
+            cross_attn_mask=src_mask,
+            use_causal_mask=True,
+            use_cache=True,
+        )
+        second = model.decoder(
+            tgt[:, 2:],
+            memory,
+            cross_attn_mask=src_mask,
+            use_causal_mask=True,
+            past_key_values=first.past_key_values,
+            use_cache=True,
+        )
+
+    assert key_projection_calls == [1, 1]
+    assert first.past_key_values is not None
+    assert second.past_key_values is not None
+    first_cross = first.past_key_values[0].cross_attention
+    second_cross = second.past_key_values[0].cross_attention
+    assert first_cross is not None
+    assert second_cross is not None
+    assert first_cross.key.data_ptr() == second_cross.key.data_ptr()
+    assert first_cross.value.data_ptr() == second_cross.value.data_ptr()
 
 
 def test_seq2seq_generate_rejects_non_vocab_output_head():

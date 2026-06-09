@@ -1,4 +1,5 @@
 from miniformer.model.attention import MultiHeadAttention
+from miniformer.model.cache import DecoderLayerCache, KeyValueCache
 from miniformer.model.decoder import DecoderOutput
 from miniformer.model.embedding import PositionalEncoding, TokenEmbedding
 from miniformer.model.feedforward import FeedForward
@@ -19,6 +20,8 @@ __all__ = [
     "TransformerModelOutput",
     "Seq2SeqModelOutput",
     "DecoderOutput",
+    "KeyValueCache",
+    "DecoderLayerCache",
     "MultiHeadAttention",
     "TokenEmbedding",
     "PositionalEncoding",

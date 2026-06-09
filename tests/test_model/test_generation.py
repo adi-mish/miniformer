@@ -1,5 +1,6 @@
 import torch
 
+from miniformer.model.cache import KeyValueCache
 from miniformer.model.outputs import TransformerModelOutput
 from miniformer.model.transformer import Transformer, TransformerConfig
 
@@ -25,6 +26,10 @@ def test_kv_cache_equivalence():
             current_token = input_ids[:, i : i + 1]
             output = model(current_token, past_key_values=past_key_values, use_cache=True)
             past_key_values = output.past_key_values
+            assert past_key_values is not None
+            assert len(past_key_values) == config.n_layers
+            assert isinstance(past_key_values[0], KeyValueCache)
+            assert past_key_values[0].key.size(2) == i + 1
             cached_outputs.append(output.output)
 
         # Concatenate cached outputs
@@ -32,6 +37,19 @@ def test_kv_cache_equivalence():
 
         # Should be identical (within numerical precision)
         assert torch.allclose(output_no_cache, output_cached, atol=1e-6)
+
+
+def test_kv_cache_rejects_non_causal_encoder_mode():
+    config = TransformerConfig(vocab_size=100, d_model=32, n_heads=4, n_layers=1, causal=False)
+    model = Transformer(config).eval()
+
+    with torch.no_grad():
+        try:
+            model(torch.randint(1, 100, (1, 1)), use_cache=True)
+        except RuntimeError as exc:
+            assert "causal=True" in str(exc)
+        else:
+            raise AssertionError("cached encoder decoding should reject non-causal mode")
 
 
 def test_generation_with_max_new_tokens():

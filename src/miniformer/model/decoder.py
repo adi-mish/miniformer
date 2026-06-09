@@ -1,21 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
 
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.attention import MultiHeadAttention
+from miniformer.model.cache import (
+    AttentionList,
+    DecoderLayerCache,
+    DecoderPastKeyValues,
+    KeyValueCache,
+)
 from miniformer.model.feedforward import FeedForward
 from miniformer.model.initialization import init_transformer_module
 from miniformer.model.masks import causal_mask
-
-KeyValue = Tuple[torch.Tensor, torch.Tensor]
-LayerPastKeyValues = Tuple[Optional[KeyValue], Optional[KeyValue]]
-DecoderPastKeyValues = List[LayerPastKeyValues]
-AttentionList = List[Optional[torch.Tensor]]
 
 
 @dataclass(frozen=True)
@@ -35,8 +36,8 @@ class DecoderLayerOutput:
     hidden_states: torch.Tensor
     self_attention: Optional[torch.Tensor]
     cross_attention: Optional[torch.Tensor]
-    self_key_values: Optional[KeyValue]
-    cross_key_values: Optional[KeyValue]
+    self_key_values: Optional[KeyValueCache]
+    cross_key_values: Optional[KeyValueCache]
 
 
 class DecoderLayer(nn.Module):
@@ -80,8 +81,8 @@ class DecoderLayer(nn.Module):
         encoder_output: torch.Tensor,
         self_attn_mask: Optional[torch.Tensor] = None,
         cross_attn_mask: Optional[torch.Tensor] = None,
-        past_self: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-        past_cross: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        past_self: Optional[KeyValueCache] = None,
+        past_cross: Optional[KeyValueCache] = None,
         use_cache: bool = False,
     ) -> DecoderLayerOutput:
 
@@ -99,26 +100,24 @@ class DecoderLayer(nn.Module):
         if not self.pre_norm:
             x = self.norm1(x)
 
-        # --- cross (no caching) ------------------------------------------
+        # --- cross --------------------------------------------------------
         residual = x
         if self.pre_norm:
             x_ = self.norm2(x)
         else:
             x_ = x
-        # we do NOT cache encoder k/v, so pass past_kv=None and use_cache=False
-        cross_out, cross_attn, _ = self.cross_attention(
+        cross_out, cross_attn, new_cross = self.cross_attention(
             q=x_,
             k=encoder_output,
             v=encoder_output,
             mask=cross_attn_mask,
-            past_kv=None,
-            use_cache=False,
+            past_kv=past_cross,
+            use_cache=use_cache,
+            static_kv=True,
         )
         x = residual + self.dropout(cross_out)
         if not self.pre_norm:
             x = self.norm2(x)
-        # new_cross is always None now
-        new_cross = None
 
         # --- ffn -----------------------------------------------------------
         residual = x
@@ -210,14 +209,7 @@ class Decoder(nn.Module):
         cross_attn_mask: Optional[torch.Tensor] = None,
         use_causal_mask: bool = True,
         *,
-        past_key_values: Optional[
-            List[
-                Tuple[
-                    Optional[KeyValue],
-                    Optional[KeyValue],
-                ]
-            ]
-        ] = None,
+        past_key_values: Optional[DecoderPastKeyValues] = None,
         use_cache: bool = False,
     ) -> DecoderOutput:
         """Run the decoder stack and return projected output, attentions, and optional cache."""
@@ -225,9 +217,9 @@ class Decoder(nn.Module):
         device = x.device
         past_len = 0
         if past_key_values is not None and len(past_key_values) > 0:
-            first_past_self = past_key_values[0][0]
+            first_past_self = past_key_values[0].self_attention
             if first_past_self is not None:
-                past_len = first_past_self[0].size(2)
+                past_len = first_past_self.key.size(2)
         if past_len + seq_len > self.config.max_seq_len:
             raise ValueError(
                 f"Sequence length {past_len + seq_len} exceeds "
@@ -262,26 +254,31 @@ class Decoder(nn.Module):
         self_attentions: AttentionList = []
         cross_attentions: AttentionList = []
         if past_key_values is None:
-            past_key_values = [(None, None) for _ in range(len(self.layers))]
+            past_key_values = [DecoderLayerCache() for _ in range(len(self.layers))]
         new_past_kv: DecoderPastKeyValues = []
 
         # ── transformer layers ───────────────────────────────────────────
         for i, layer in enumerate(self.layers):
-            past_self, past_cross = past_key_values[i]
+            past_layer = past_key_values[i]
             layer_output = layer(
                 x,
                 encoder_output,
                 self_attn_mask,
                 cross_attn_mask,
-                past_self,
-                past_cross,
+                past_layer.self_attention,
+                past_layer.cross_attention,
                 use_cache,
             )
             x = layer_output.hidden_states
             self_attentions.append(layer_output.self_attention)
             cross_attentions.append(layer_output.cross_attention)
             if use_cache:
-                new_past_kv.append((layer_output.self_key_values, layer_output.cross_key_values))
+                new_past_kv.append(
+                    DecoderLayerCache(
+                        self_attention=layer_output.self_key_values,
+                        cross_attention=layer_output.cross_key_values,
+                    )
+                )
 
         self.self_attentions = self_attentions
         self.cross_attentions = cross_attentions
