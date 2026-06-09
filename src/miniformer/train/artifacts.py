@@ -56,7 +56,7 @@ def write_run_manifest(
         "status": status,
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "package_version": __version__,
-        "git_sha": _git_sha(),
+        "git_sha": get_git_sha(),
         "device": str(device),
         "epoch": epoch,
         "train_config": asdict(cfg),
@@ -71,7 +71,7 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True))
 
 
-def _git_sha() -> str | None:
+def get_git_sha() -> str | None:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],

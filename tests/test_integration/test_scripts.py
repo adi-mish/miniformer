@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import torch
+
 
 def test_make_tiny_jsonl_script_writes_all_tasks(tmp_path):
     result = subprocess.run(
@@ -108,6 +110,46 @@ def test_validate_jsonl_script_reports_schema_errors(tmp_path):
     assert "input string" in result.stdout
 
 
+def test_inspect_checkpoint_script_reports_metadata(tmp_path):
+    checkpoint = tmp_path / "model.pt"
+    torch.save(
+        {
+            "format_version": 2,
+            "epoch": 3,
+            "metrics": {"val_loss": 0.5},
+            "metadata": {"package_version": "test"},
+            "train_config": {
+                "task": "classification",
+                "model": "encoder",
+                "pooling": "masked_mean",
+                "model_config": {"output_dim": 2},
+            },
+            "state_dict": {"weight": torch.ones(1)},
+            "optimizer_state_dict": {},
+        },
+        checkpoint,
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "miniformer.scripts.inspect_checkpoint",
+            str(checkpoint),
+            "--json",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["format_version"] == 2
+    assert payload["task"] == "classification"
+    assert payload["optimizer_present"] is True
+
+
 def test_script_modules_import_without_side_effects():
     scripts_dir = Path(__file__).resolve().parents[2] / "src" / "miniformer" / "scripts"
     script_names = {
@@ -115,6 +157,7 @@ def test_script_modules_import_without_side_effects():
     }
 
     assert script_names == {
+        "inspect_checkpoint",
         "make_tiny_jsonl",
         "run_checks",
         "validate_jsonl",

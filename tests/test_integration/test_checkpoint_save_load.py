@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from miniformer.train.module import MiniFormerModule
@@ -59,8 +60,25 @@ def test_save_and_load_checkpoint(tmp_path):
     loaded = MiniFormerModule.load_checkpoint(checkpoint, cfg=cfg)
     saved = torch.load(checkpoint, map_location="cpu", weights_only=False)
 
+    assert saved["format_version"] == 2
+    assert saved["train_config"]["task"] == "classification"
+    assert saved["model_config"]["output_dim"] == 3
+    assert saved["metadata"]["package_version"]
     for name, param in loaded.state_dict().items():
         assert torch.allclose(param, saved["state_dict"][name])
+
+
+def test_load_checkpoint_rejects_incompatible_config(tmp_path):
+    data = make_data(tmp_path)
+    cfg = make_cfg(tmp_path, data)
+    train_model(cfg)
+
+    checkpoint = tmp_path / "checkpoint_test" / "checkpoints" / "best.pt"
+    incompatible = make_cfg(tmp_path, data)
+    incompatible.model_config["output_dim"] = 4
+
+    with pytest.raises(ValueError, match="not compatible"):
+        MiniFormerModule.load_checkpoint(checkpoint, cfg=incompatible)
 
 
 def test_resume_training_from_checkpoint(tmp_path):

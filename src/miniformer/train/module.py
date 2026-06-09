@@ -12,6 +12,12 @@ import torch.nn.functional as F
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
 from miniformer.model.transformer import Transformer
+from miniformer.train.checkpoints import (
+    CHECKPOINT_FORMAT_VERSION,
+    checkpoint_metadata,
+    checkpoint_train_config,
+    validate_checkpoint_compatibility,
+)
 from miniformer.train.pooling import PoolingMode, pool_sequence_outputs
 from miniformer.train.train_config import TrainConfig
 
@@ -221,11 +227,21 @@ class MiniFormerModule(nn.Module):
         epoch: int = 0,
         metrics: Optional[Dict[str, float]] = None,
     ) -> None:
+        checkpoint_metrics = metrics or {}
+        model_config = getattr(self.model, "config").to_dict()
         checkpoint = {
+            "format_version": CHECKPOINT_FORMAT_VERSION,
             "cfg": asdict(self.cfg),
+            "train_config": checkpoint_train_config(self.cfg),
+            "model_config": model_config,
+            "metadata": checkpoint_metadata(
+                self.cfg,
+                epoch=epoch,
+                metrics=checkpoint_metrics,
+            ),
             "state_dict": self.state_dict(),
             "epoch": epoch,
-            "metrics": metrics or {},
+            "metrics": checkpoint_metrics,
         }
         if optimizer is not None:
             checkpoint["optimizer_state_dict"] = optimizer.state_dict()
@@ -239,7 +255,10 @@ class MiniFormerModule(nn.Module):
     ) -> "MiniFormerModule":
         checkpoint = torch.load(path, map_location="cpu", weights_only=False)
         if cfg is None:
-            cfg = TrainConfig(**checkpoint["cfg"])
+            cfg_payload = checkpoint.get("train_config") or checkpoint["cfg"]
+            cfg = TrainConfig(**cfg_payload)
+        else:
+            validate_checkpoint_compatibility(checkpoint, cfg)
         module = cls(cfg)
         module.load_state_dict(checkpoint["state_dict"])
         return module

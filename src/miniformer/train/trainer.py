@@ -11,6 +11,7 @@ import torch
 from miniformer.data.validation import TaskName, validate_jsonl
 
 from .artifacts import create_run_paths, write_run_manifest, write_train_config
+from .checkpoints import validate_checkpoint_compatibility
 from .datamodule import MiniFormerDataModule
 from .module import MiniFormerModule
 from .train_config import TrainConfig
@@ -126,6 +127,7 @@ def train_model(
     module = module or MiniFormerModule(cfg)
     if ckpt_path is not None:
         loaded = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        validate_checkpoint_compatibility(loaded, cfg)
         module.load_state_dict(loaded["state_dict"])
     module.to(device)
 
