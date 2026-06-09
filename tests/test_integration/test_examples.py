@@ -67,6 +67,7 @@ def test_jsonl_trace_example_smoke(tmp_path):
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "data" / "train.jsonl").exists()
     assert (tmp_path / "jsonl-trace" / "checkpoints" / "last.pt").exists()
-    assert "Miniformer Trace" in (tmp_path / "trace.html").read_text()
-    assert (tmp_path / "trace.json").exists()
-    assert (tmp_path / "metrics.json").exists()
+    assert "Miniformer Trace" in (tmp_path / "jsonl-trace" / "traces" / "trace.html").read_text()
+    assert (tmp_path / "jsonl-trace" / "traces" / "trace.json").exists()
+    assert (tmp_path / "jsonl-trace" / "metrics.csv").exists()
+    assert (tmp_path / "jsonl-trace" / "run_manifest.json").exists()

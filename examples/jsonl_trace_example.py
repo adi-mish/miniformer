@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -62,7 +61,7 @@ def run_example(
     )
 
     module = MiniFormerModule(cfg)
-    metrics = train_model(cfg, module=module)
+    train_model(cfg, module=module)
 
     datamodule = MiniFormerDataModule(cfg)
     datamodule.setup()
@@ -74,20 +73,20 @@ def run_example(
     with torch.no_grad():
         trace = module.model.trace(input_ids, top_k=2, compare_cache=False)
 
-    trace_html = root / "trace.html"
-    trace_json = root / "trace.json"
-    metrics_json = root / "metrics.json"
+    run_dir = root / cfg.experiment_name
+    trace_html = run_dir / "traces" / "trace.html"
+    trace_json = run_dir / "traces" / "trace.json"
     tokens = [str(token_id) for token_id in input_ids[0].tolist()]
     trace.to_html(trace_html, tokens=tokens)
     trace.save_json(trace_json)
-    metrics_json.write_text(json.dumps(metrics, indent=2))
 
     return {
         "train_jsonl": data_paths["train"],
         "val_jsonl": data_paths["val"],
         "trace_html": trace_html,
         "trace_json": trace_json,
-        "metrics_json": metrics_json,
+        "metrics_csv": run_dir / "metrics.csv",
+        "manifest": run_dir / "run_manifest.json",
     }
 
 

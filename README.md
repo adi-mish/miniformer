@@ -67,6 +67,14 @@ For development with additional tools like linting and documentation:
 uv sync --extra dev --extra docs
 ```
 
+Optional features are split into extras:
+
+```bash
+uv sync --extra viz        # plotting and embedding visualization
+uv sync --extra tokenizers # HuggingFace tokenizer support for the trainer CLI
+uv sync --extra examples   # dependencies used by plotting examples
+```
+
 To run commands in the uv environment:
 
 ```bash
@@ -78,7 +86,9 @@ The installed console entry points use the same uv environment:
 ```bash
 uv run miniformer-train --help
 uv run miniformer-make-jsonl --help
+uv run miniformer-validate-jsonl --help
 uv run miniformer-trace-report --help
+uv run miniformer-inspect-checkpoint --help
 uv run miniformer-check --list
 ```
 
@@ -98,8 +108,14 @@ and inspection workflows:
 # Generate deterministic tiny JSONL train/validation files
 uv run miniformer-make-jsonl --task all --output-dir data/tiny
 
+# Validate a dataset before training
+uv run miniformer-validate-jsonl data/tiny/classification/train.jsonl --task classification
+
 # Write a standalone transformer internals report without training
 uv run miniformer-trace-report --output-html trace.html --output-json trace.json
+
+# Inspect checkpoint metadata without loading a model
+uv run miniformer-inspect-checkpoint runs/example/checkpoints/best.pt --json
 
 # Run the same verification gate used during development
 uv run miniformer-check
@@ -220,8 +236,8 @@ outputs = model(input_ids)
 projection = outputs.projection
 assert projection is not None
 
-# For classification, use the first token
-cls_output = projection[:, 0, :]  # Shape: [2, 10]
+# For direct classification code, choose pooling explicitly
+cls_output = projection.mean(dim=1)  # Shape: [2, 10]
 ```
 
 **Using the seq2seq model:**
@@ -291,8 +307,14 @@ The current public contracts are intentionally strict:
   `"learned+rope"` with the matching `rotary_pct` setting.
 - The training wrapper is deliberately small. It moves tensor batches to the
   device, calls the model, computes task losses, and does not tokenize text.
+- Classification and regression use explicit supervised pooling. The default is
+  `pooling="masked_mean"`, which uses `attention_mask` so padded tokens or feature
+  steps do not affect logits. Set `pooling="first"` or `pooling="mean"` only when
+  that behavior is intentional.
 - Inspection traces are static artifacts. `trace.to_html(...)` writes a
   self-contained report; no frontend server is required.
+- Training runs preflight JSONL validation, writes standard run artifacts, and
+  stores checkpoint metadata for compatibility checks.
 
 These rules are enforced in tests so old implicit behavior does not silently
 come back.
@@ -380,6 +402,7 @@ batch = collate_records(
 )
 
 input_ids = batch["input_ids"]  # LongTensor [batch, seq_len]
+mask = batch["attention_mask"]  # BoolTensor [batch, seq_len]
 labels = batch["labels"]       # LongTensor [batch]
 ```
 
@@ -389,6 +412,10 @@ object with an `encode(text, add_special_tokens=True)` method. For supervised
 string inputs, `collate_records` can use that tokenizer or a deterministic
 hash-based fallback. Numeric feature records are padded into `batch["input"]`
 float tensors.
+
+Use `miniformer-validate-jsonl` or `miniformer.data.validate_jsonl(...)` to catch
+schema issues, empty strings, label dtype problems, excessive sequence lengths,
+and class-count surprises before training starts.
 
 ---
 
@@ -470,6 +497,7 @@ config = TrainConfig(
     val_path="data/val.jsonl",
     task="language_modeling",          # "classification", "regression"
     model="seq2seq",                   # "encoder" for encoder-only
+    pooling="masked_mean",             # supervised tasks only
     batch_size=32,
     max_epochs=10,
     lr=3e-4,                           # Learning rate
@@ -498,6 +526,21 @@ The trainer logs different metrics based on your task:
 - **Regression**: Loss and mean absolute error
 
 Checkpoints save based on validation loss by default, but you can change that in the config.
+Each run writes a standard artifact layout:
+
+```text
+runs/<experiment_name>/
+├── config.json
+├── metrics.csv
+├── run_manifest.json
+├── checkpoints/
+│   ├── best.pt
+│   └── last.pt
+└── traces/
+```
+
+Use `miniformer-inspect-checkpoint` to inspect checkpoint metadata, task/model
+configuration, metrics, and optimizer-state presence.
 
 ---
 
@@ -580,9 +623,14 @@ uv run pytest tests/ -k "attention"  # Only attention-related tests
 uv run miniformer-check
 ```
 
+The repository also includes a GitHub Actions workflow that runs the same gate
+on Python 3.10, 3.11, and 3.12.
+
 The tests cover:
 - **Model architecture**: Shape correctness, initialization, forward passes
 - **Training behavior**: Loss computation, gradient flow, metric tracking
+- **Data validation**: JSONL schema checks, labels, sequence lengths, class counts
+- **Artifacts**: Run manifests, checkpoint metadata, and script smoke tests
 - **Persistence**: Model save/load and trainer checkpoint restore behavior
 - **Integration**: Full training loops for each task type
 - **Edge cases**: Empty batches, extreme values, device transfers
@@ -598,6 +646,8 @@ The library currently handles:
 - Multi-head attention with RoPE support
 - SwiGLU and other gated activations
 - Plain PyTorch training pipeline
+- Mask-aware supervised pooling and JSONL validation
+- Run manifests and metadata-rich checkpoints
 - Encoder and decoder KV-cache paths for causal generation
 - Forward-pass visualization traces and attention plots
 - Classification, regression, and language modeling tasks
@@ -628,7 +678,7 @@ Some things I haven't gotten to yet:
 
 - Direct FlashAttention 2 integration is not implemented; use PyTorch SDPA via `use_sdpa=True` where supported
 - Generation with very long sequences can be slow without FlashAttention
-- The trainer CLI defaults to HuggingFace GPT-2 tokenization for language modeling; custom tokenizers should provide `encode(text, add_special_tokens=True)`
+- The trainer CLI defaults to HuggingFace GPT-2 tokenization for language modeling when `miniformer[tokenizers]` is installed; custom tokenizers should provide `encode(text, add_special_tokens=True)`
 
 ---
 
