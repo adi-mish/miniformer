@@ -17,6 +17,12 @@ dependencies = [
     "transformers>=4.53.0,<5.0.0",
 ]
 
+[project.scripts]
+miniformer-train = "miniformer.train.trainer:main"
+miniformer-check = "miniformer.scripts.run_checks:main"
+miniformer-make-jsonl = "miniformer.scripts.make_tiny_jsonl:main"
+miniformer-trace-report = "miniformer.scripts.write_trace_report:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.4.1,<9.0.0",

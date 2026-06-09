@@ -41,3 +41,32 @@ def test_train_model_example_smoke(tmp_path):
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "final_model" / "model.pt").exists()
     assert (tmp_path / "final_model" / "config.json").exists()
+
+
+def test_jsonl_trace_example_smoke(tmp_path):
+    script = Path(__file__).resolve().parents[2] / "examples" / "jsonl_trace_example.py"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--output-dir",
+            str(tmp_path),
+            "--max-epochs",
+            "1",
+            "--train-rows",
+            "4",
+            "--val-rows",
+            "2",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "data" / "train.jsonl").exists()
+    assert (tmp_path / "jsonl-trace" / "checkpoints" / "last.pt").exists()
+    assert "Miniformer Trace" in (tmp_path / "trace.html").read_text()
+    assert (tmp_path / "trace.json").exists()
+    assert (tmp_path / "metrics.json").exists()

@@ -43,7 +43,8 @@ def main():
         config = BASE_CONFIG
     config = TransformerConfig.from_dict(config.to_dict())
 
-    # Override configuration with command line arguments
+    # Models accept tensor batches. This example keeps the dataset synthetic and
+    # tensor-native; JSONL/text preprocessing lives in miniformer.data.
     config.batch_size = args.batch_size
     config.learning_rate = args.lr
     config.output_mode = "vocab"
@@ -60,7 +61,7 @@ def main():
             return self.size
 
         def __getitem__(self, idx):
-            # Create random input and target sequences
+            # Create random token and target sequences.
             input_ids = torch.randint(1, self.vocab_size, (self.seq_len,))
             labels = torch.randint(0, self.vocab_size, (self.seq_len,))
             return input_ids, labels

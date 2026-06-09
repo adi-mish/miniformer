@@ -20,10 +20,12 @@ The library started as a learning exercise but evolved into something useful for
 
 - [What's Actually Here](#whats-actually-here)
 - [Getting Started](#getting-started)
+- [Useful Scripts](#useful-scripts)
 - [Project Layout](#project-layout)
 - [Basic Usage](#basic-usage)
   - [Command Line Training](#command-line-training)
   - [Python API](#python-api)
+- [Design Contracts](#design-contracts)
 - [Visualization](#visualization)
 - [Data Formats](#data-formats)
 - [Architecture Details](#architecture-details)
@@ -71,11 +73,43 @@ To run commands in the uv environment:
 uv run python -m miniformer.train.trainer --help
 ```
 
+The installed console entry points use the same uv environment:
+
+```bash
+uv run miniformer-train --help
+uv run miniformer-make-jsonl --help
+uv run miniformer-trace-report --help
+uv run miniformer-check --list
+```
+
 **Alternative installation with pip**:
 
 ```bash
 pip install -e .              # Basic installation
 pip install -e ".[dev,docs]"  # With development dependencies
+```
+
+## Useful Scripts
+
+The repository includes small, import-safe script modules for common development
+and inspection workflows:
+
+```bash
+# Generate deterministic tiny JSONL train/validation files
+uv run miniformer-make-jsonl --task all --output-dir data/tiny
+
+# Write a standalone transformer internals report without training
+uv run miniformer-trace-report --output-html trace.html --output-json trace.json
+
+# Run the same verification gate used during development
+uv run miniformer-check
+```
+
+For a complete tiny workflow that generates JSONL, trains for one epoch, and
+writes `trace.html`, run:
+
+```bash
+uv run python examples/jsonl_trace_example.py --output-dir runs/jsonl-trace-example
 ```
 
 ## Project Layout
@@ -102,6 +136,7 @@ miniformer/
 │   │   ├── module.py        # Plain PyTorch training wrapper
 │   │   ├── trainer.py       # CLI entry point
 │   │   └── train_config.py  # Training configuration
+│   ├── scripts/             # Small CLI helpers
 │   ├── utils/               # Utility functions
 │   └── visualization/       # Attention plotting tools
 ├── tests/                   # Comprehensive test suite
@@ -242,6 +277,28 @@ calling `Transformer.forward`, `Seq2SeqTransformer.forward`, or `MiniFormerModul
 
 ---
 
+## Design Contracts
+
+The current public contracts are intentionally strict:
+
+- Models accept tensors only. Raw text, JSONL records, and Python feature records
+  are converted by `miniformer.data.preprocessing` or `MiniFormerDataModule`.
+- Output heads are explicit. `output_mode="hidden"` returns hidden states,
+  `output_mode="vocab"` returns vocabulary logits, and
+  `output_mode="projection"` returns `output_dim` projections.
+- Generation requires token models with `output_mode="vocab"`.
+- Position behavior is explicit. Use `position_mode="learned"`, `"rope"`, or
+  `"learned+rope"` with the matching `rotary_pct` setting.
+- The training wrapper is deliberately small. It moves tensor batches to the
+  device, calls the model, computes task losses, and does not tokenize text.
+- Inspection traces are static artifacts. `trace.to_html(...)` writes a
+  self-contained report; no frontend server is required.
+
+These rules are enforced in tests so old implicit behavior does not silently
+come back.
+
+---
+
 ## Visualization
 
 For a quick look inside a forward pass, use the structured inspection API. This runs an eval/no-grad forward pass, restores the model's original training mode, and returns a JSON-serializable trace:
@@ -326,11 +383,12 @@ input_ids = batch["input_ids"]  # LongTensor [batch, seq_len]
 labels = batch["labels"]       # LongTensor [batch]
 ```
 
-For language modeling, you'll need a tokenizer. The trainer tries to load GPT-2's
-tokenizer from HuggingFace by default, but you can provide your own object with an
-`encode(text, add_special_tokens=True)` method. For supervised string inputs,
-`collate_records` can use that tokenizer or a deterministic hash-based fallback.
-Numeric feature records are padded into `batch["input"]` float tensors.
+For language modeling, you'll need a tokenizer. The trainer's CLI tries to load
+GPT-2's tokenizer from HuggingFace by default, but library code only requires an
+object with an `encode(text, add_special_tokens=True)` method. For supervised
+string inputs, `collate_records` can use that tokenizer or a deterministic
+hash-based fallback. Numeric feature records are padded into `batch["input"]`
+float tensors.
 
 ---
 
@@ -505,7 +563,7 @@ I wrote a fairly comprehensive test suite to catch regressions. Run it with:
 
 ```bash
 # All tests
-uv run pytest tests/
+uv run pytest -q
 
 # With coverage
 uv run pytest tests/ --cov=miniformer
@@ -517,6 +575,9 @@ uv run pytest tests/test_integration/ # End-to-end tests
 
 # Pattern matching
 uv run pytest tests/ -k "attention"  # Only attention-related tests
+
+# Full local gate
+uv run miniformer-check
 ```
 
 The tests cover:
@@ -556,7 +617,8 @@ Some things I haven't gotten to yet:
 - **FlashAttention 2**: Direct integration beyond PyTorch SDPA
 - **Beam search decoding**: For better generation quality
 - **Gradient checkpointing**: Memory-efficient training for larger models
-- **Better examples**: More realistic use cases and tutorials
+- **Tokenizer adapters**: Small adapters for tokenizer libraries beyond the
+  minimal `encode(...)` protocol
 - **LoRA fine-tuning**: Parameter-efficient adaptation
 - **Model parallelism**: Multi-GPU training support  
 - **ONNX export**: For deployment to different runtimes
@@ -566,7 +628,7 @@ Some things I haven't gotten to yet:
 
 - Direct FlashAttention 2 integration is not implemented; use PyTorch SDPA via `use_sdpa=True` where supported
 - Generation with very long sequences can be slow without FlashAttention
-- The tokenizer integration assumes HuggingFace transformers—you'll need to adapt for custom tokenizers
+- The trainer CLI defaults to HuggingFace GPT-2 tokenization for language modeling; custom tokenizers should provide `encode(text, add_special_tokens=True)`
 
 ---
 
