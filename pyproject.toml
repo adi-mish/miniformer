@@ -10,11 +10,6 @@ requires-python = ">=3.10,<4.0"
 dependencies = [
     "numpy>=2.0.0",
     "torch>=2.0.0",
-    "matplotlib>=3.7.0",
-    "tqdm>=4.65.0",
-    "pandas>=2.0.0",
-    "scikit-learn>=1.2.0",
-    "transformers>=4.53.0,<5.0.0",
 ]
 
 [project.scripts]
@@ -26,6 +21,16 @@ miniformer-validate-jsonl = "miniformer.scripts.validate_jsonl:main"
 miniformer-trace-report = "miniformer.scripts.write_trace_report:main"
 
 [project.optional-dependencies]
+viz = [
+    "matplotlib>=3.7.0",
+    "scikit-learn>=1.2.0",
+]
+tokenizers = [
+    "transformers>=4.53.0,<5.0.0",
+]
+examples = [
+    "matplotlib>=3.7.0",
+]
 dev = [
     "pytest>=8.4.1,<9.0.0",
     "hypothesis>=6.0.0",
@@ -35,6 +40,9 @@ dev = [
     "flake8>=6.0.0",
     "mypy>=1.0.0",
     "jupyterlab>=4.0.0",
+    "matplotlib>=3.7.0",
+    "scikit-learn>=1.2.0",
+    "transformers>=4.53.0,<5.0.0",
 ]
 docs = [
     "sphinx>=6.0.0",

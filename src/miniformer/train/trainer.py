@@ -233,7 +233,9 @@ def main():
 
             tokenizer = AutoTokenizer.from_pretrained("gpt2")
         except ImportError as exc:
-            raise ImportError("Install transformers or provide your own tokenizer") from exc
+            raise ImportError(
+                "Install miniformer[tokenizers] or provide your own tokenizer"
+            ) from exc
 
     metrics = train_model(cfg, tokenizer=tokenizer)
     if metrics:

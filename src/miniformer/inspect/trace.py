@@ -915,7 +915,10 @@ def capture_transformer_trace(
 
 def plot_trace_summary(trace: TransformerTrace):
     """Plot residual, attention, and MLP norms from a captured trace."""
-    import matplotlib.pyplot as plt
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        raise ImportError("Install miniformer[viz] to use plotting helpers") from exc
 
     fig, ax = plt.subplots(figsize=(max(7, len(trace.layers) * 1.5), 4.5))
     names = [layer.name for layer in trace.layers]

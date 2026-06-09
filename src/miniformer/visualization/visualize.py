@@ -1,6 +1,13 @@
-import matplotlib.pyplot as plt
-import numpy as np
 import torch
+
+
+def _plotting_dependencies():
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+    except ImportError as exc:
+        raise ImportError("Install miniformer[viz] to use plotting helpers") from exc
+    return plt, np
 
 
 def plot_attention(attention_weights, layer=0, head=0, tokens=None):
@@ -27,6 +34,7 @@ def plot_attention(attention_weights, layer=0, head=0, tokens=None):
     if head < 0 or head >= layer_weights.size(1):
         raise IndexError(f"head index {head} out of range for {layer_weights.size(1)} heads")
 
+    plt, np = _plotting_dependencies()
     attn = layer_weights[0, head].cpu().detach().numpy()
 
     # Create figure
@@ -58,8 +66,12 @@ def plot_attention(attention_weights, layer=0, head=0, tokens=None):
 
 def visualize_embeddings(model, vocab, method="pca"):
     """Visualize token embeddings using dimensionality reduction"""
-    import sklearn.decomposition as decomposition
-    import sklearn.manifold as manifold
+    plt, _ = _plotting_dependencies()
+    try:
+        import sklearn.decomposition as decomposition
+        import sklearn.manifold as manifold
+    except ImportError as exc:
+        raise ImportError("Install miniformer[viz] to use embedding visualization") from exc
 
     # Get embeddings from model
     token_embedding = model.encoder.token_embedding
