@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -31,8 +32,13 @@ class AttentionTrace:
     name: str
     shape: tuple[int, ...]
     entropy: Optional[float]
+    per_head_entropy: Optional[List[float]]
     max_probability: Optional[float]
     mean_probability: Optional[float]
+    q_projection: Optional[TensorSummary] = None
+    k_projection: Optional[TensorSummary] = None
+    v_projection: Optional[TensorSummary] = None
+    weights: Optional[List[List[List[float]]]] = None
     available: bool = True
     reason: Optional[str] = None
 
@@ -49,10 +55,13 @@ class LayerTrace:
     input_norm: float
     output_norm: float
     residual_delta_norm: Optional[float]
+    residual_by_token: Optional[List[List[float]]] = None
     self_attention_output_norm: Optional[float] = None
     cross_attention_output_norm: Optional[float] = None
     mlp_activation_norm: Optional[float] = None
     mlp_output_norm: Optional[float] = None
+    mlp_activation: Optional[TensorSummary] = None
+    mlp_output: Optional[TensorSummary] = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +73,8 @@ class LogitTrace:
     token_ids: List[List[List[int]]]
     values: List[List[List[float]]]
     probabilities: List[List[List[float]]]
+    entropy: List[List[float]]
+    top_token_ids: List[List[int]]
 
 
 @dataclass(frozen=True)
@@ -109,6 +120,217 @@ class TransformerTrace:
         """Write the trace to a JSON file."""
         Path(path).write_text(self.to_json(indent=indent))
 
+    def to_html(self, path: str | Path, tokens: Optional[Sequence[str]] = None) -> None:
+        """Write a self-contained HTML report for this trace."""
+        save_trace_html(self, path, tokens=tokens)
+
+
+def _fmt(value: Optional[float]) -> str:
+    if value is None:
+        return ""
+    return f"{value:.6g}"
+
+
+def _shape_text(shape: Sequence[int]) -> str:
+    return "x".join(str(item) for item in shape) if shape else ""
+
+
+def _heatmap_table(
+    values: Sequence[Sequence[float]], *, tokens: Optional[Sequence[str]] = None
+) -> str:
+    if not values:
+        return "<p>No values.</p>"
+    flat = [float(item) for row in values for item in row]
+    minimum = min(flat)
+    maximum = max(flat)
+    span = max(maximum - minimum, 1e-12)
+    header = "<tr><th></th>"
+    width = max(len(row) for row in values)
+    for col in range(width):
+        label = tokens[col] if tokens is not None and col < len(tokens) else str(col)
+        header += f"<th>{html.escape(label)}</th>"
+    header += "</tr>"
+    rows = [header]
+    for row_index, row in enumerate(values):
+        label = f"b{row_index}"
+        cells = [f"<th>{html.escape(label)}</th>"]
+        for value in row:
+            intensity = (float(value) - minimum) / span
+            color = int(255 - 155 * intensity)
+            cells.append(
+                "<td style='background:"
+                f"rgb(255,{color},{color})' title='{html.escape(_fmt(float(value)))}'>"
+                f"{html.escape(_fmt(float(value)))}</td>"
+            )
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+    return "<table class='heatmap'>" + "".join(rows) + "</table>"
+
+
+def _summary_row(label: str, summary: Optional[TensorSummary]) -> str:
+    if summary is None:
+        return f"<tr><td>{html.escape(label)}</td><td colspan='6'>Unavailable</td></tr>"
+    return (
+        f"<tr><td>{html.escape(label)}</td>"
+        f"<td>{html.escape(_shape_text(summary.shape))}</td>"
+        f"<td>{html.escape(_fmt(summary.mean))}</td>"
+        f"<td>{html.escape(_fmt(summary.std))}</td>"
+        f"<td>{html.escape(_fmt(summary.minimum))}</td>"
+        f"<td>{html.escape(_fmt(summary.maximum))}</td>"
+        f"<td>{html.escape(_fmt(summary.norm))}</td></tr>"
+    )
+
+
+def _summary_table(title: str, rows: Sequence[tuple[str, Optional[TensorSummary]]]) -> str:
+    body = "".join(_summary_row(label, summary) for label, summary in rows)
+    return (
+        f"<h4>{html.escape(title)}</h4><table>"
+        "<tr><th>Name</th><th>Shape</th><th>Mean</th><th>Std</th>"
+        "<th>Min</th><th>Max</th><th>Norm</th></tr>"
+        f"{body}</table>"
+    )
+
+
+def _attention_section(attention: AttentionTrace, tokens: Optional[Sequence[str]]) -> str:
+    parts = [
+        f"<section><h3>{html.escape(attention.name)}</h3>",
+        "<p>"
+        f"Shape: {html.escape(_shape_text(attention.shape))} | "
+        f"Entropy: {html.escape(_fmt(attention.entropy))} | "
+        f"Max probability: {html.escape(_fmt(attention.max_probability))}"
+        "</p>",
+        _summary_table(
+            "Q/K/V Projection Summaries",
+            [
+                ("Q", attention.q_projection),
+                ("K", attention.k_projection),
+                ("V", attention.v_projection),
+            ],
+        ),
+    ]
+    if attention.per_head_entropy is not None:
+        entropy_values = ", ".join(_fmt(value) for value in attention.per_head_entropy)
+        parts.append(f"<p>Per-head entropy: {html.escape(entropy_values)}</p>")
+    if not attention.available:
+        parts.append(f"<p class='notice'>{html.escape(attention.reason or 'Unavailable')}</p>")
+    elif attention.weights is not None:
+        for head_index, head_weights in enumerate(attention.weights):
+            parts.append(f"<h4>Raw Attention Heatmap Head {head_index}</h4>")
+            parts.append(_heatmap_table(head_weights, tokens=tokens))
+    parts.append("</section>")
+    return "".join(parts)
+
+
+def _logit_section(logits: LogitTrace, tokens: Optional[Sequence[str]]) -> str:
+    rows = []
+    first_batch_ids = logits.token_ids[0] if logits.token_ids else []
+    first_batch_values = logits.values[0] if logits.values else []
+    first_batch_probs = logits.probabilities[0] if logits.probabilities else []
+    first_batch_entropy = logits.entropy[0] if logits.entropy else []
+    for index, token_ids in enumerate(first_batch_ids):
+        label = tokens[index] if tokens is not None and index < len(tokens) else str(index)
+        values = first_batch_values[index]
+        probs = first_batch_probs[index]
+        top_items = ", ".join(
+            f"{token_id}:{_fmt(value)} ({_fmt(prob)})"
+            for token_id, value, prob in zip(token_ids, values, probs)
+        )
+        entropy = first_batch_entropy[index] if index < len(first_batch_entropy) else None
+        rows.append(
+            f"<tr><td>{html.escape(label)}</td>"
+            f"<td>{html.escape(str(logits.top_token_ids[0][index]))}</td>"
+            f"<td>{html.escape(_fmt(entropy))}</td>"
+            f"<td>{html.escape(top_items)}</td></tr>"
+        )
+    return (
+        "<section><h2>Logit Evolution</h2>"
+        "<table><tr><th>Token</th><th>Top token</th><th>Entropy</th><th>Top-k</th></tr>"
+        + "".join(rows)
+        + "</table></section>"
+    )
+
+
+def save_trace_html(
+    trace: TransformerTrace,
+    path: str | Path,
+    tokens: Optional[Sequence[str]] = None,
+) -> None:
+    """Write a self-contained static HTML report for a transformer trace."""
+    cache = trace.cache
+    cache_status = (
+        f"attempted={cache.attempted}, supported={cache.supported}, "
+        f"allclose={cache.allclose}, max_abs_diff={_fmt(cache.max_abs_diff)}, "
+        f"tokens_compared={cache.tokens_compared}"
+    )
+    layer_rows = []
+    residual_sections = []
+    for layer in trace.layers:
+        layer_rows.append(
+            f"<tr><td>{html.escape(layer.name)}</td>"
+            f"<td>{html.escape(_shape_text(layer.shape))}</td>"
+            f"<td>{html.escape(_fmt(layer.input_norm))}</td>"
+            f"<td>{html.escape(_fmt(layer.output_norm))}</td>"
+            f"<td>{html.escape(_fmt(layer.residual_delta_norm))}</td>"
+            f"<td>{html.escape(_fmt(layer.self_attention_output_norm))}</td>"
+            f"<td>{html.escape(_fmt(layer.cross_attention_output_norm))}</td>"
+            f"<td>{html.escape(_fmt(layer.mlp_activation_norm))}</td>"
+            f"<td>{html.escape(_fmt(layer.mlp_output_norm))}</td></tr>"
+        )
+        if layer.residual_by_token is not None:
+            residual_sections.append(
+                f"<h3>{html.escape(layer.name)} Residual Norms</h3>"
+                + _heatmap_table(layer.residual_by_token, tokens=tokens)
+            )
+        if layer.mlp_activation is not None or layer.mlp_output is not None:
+            residual_sections.append(
+                _summary_table(
+                    f"{layer.name} MLP Summaries",
+                    [
+                        ("activation", layer.mlp_activation),
+                        ("output", layer.mlp_output),
+                    ],
+                )
+            )
+
+    attention_sections = "".join(
+        _attention_section(attention, tokens) for attention in trace.attentions
+    )
+    logits_section = _logit_section(trace.logits, tokens) if trace.logits is not None else ""
+    metadata = html.escape(json.dumps(trace.metadata, indent=2, default=str))
+    document = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Miniformer Trace</title>
+<style>
+body {{ font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 24px; color: #17202a; }}
+table {{ border-collapse: collapse; margin: 12px 0 24px; width: 100%; font-size: 13px; }}
+th, td {{ border: 1px solid #d7dde5; padding: 6px 8px; text-align: right; }}
+th:first-child, td:first-child {{ text-align: left; }}
+th {{ background: #eef2f6; }}
+section {{ border-top: 1px solid #d7dde5; padding-top: 16px; margin-top: 18px; }}
+.notice {{ background: #fff7d6; border: 1px solid #e7cb62; padding: 8px; }}
+.heatmap td {{ min-width: 44px; font-variant-numeric: tabular-nums; }}
+pre {{ background: #f6f8fa; padding: 12px; overflow: auto; }}
+</style>
+</head>
+<body>
+<h1>Miniformer Trace</h1>
+<p>Output shape: {html.escape(_shape_text(trace.output_shape))}</p>
+<section><h2>Cache Status</h2><p>{html.escape(cache_status)}</p>
+<p>{html.escape(cache.reason or "")}</p></section>
+<section><h2>Layer Table</h2>
+<table><tr><th>Layer</th><th>Shape</th><th>Input norm</th><th>Output norm</th>
+<th>Residual delta</th><th>Self-attn norm</th><th>Cross-attn norm</th>
+<th>MLP activation</th><th>MLP output</th></tr>{''.join(layer_rows)}</table>
+{''.join(residual_sections)}</section>
+<section><h2>Attention</h2>{attention_sections}</section>
+{logits_section}
+<section><h2>Metadata</h2><pre>{metadata}</pre></section>
+</body>
+</html>
+"""
+    Path(path).write_text(document)
+
 
 @dataclass
 class _LayerState:
@@ -120,6 +342,8 @@ class _LayerState:
     cross_attention_output_norm: Optional[float] = None
     mlp_activation_norm: Optional[float] = None
     mlp_output_norm: Optional[float] = None
+    mlp_activation: Optional[TensorSummary] = None
+    mlp_output: Optional[TensorSummary] = None
 
 
 def _as_tensor(output: Any) -> Optional[torch.Tensor]:
@@ -147,27 +371,46 @@ def _summary(name: str, tensor: torch.Tensor) -> TensorSummary:
     )
 
 
-def _attention_trace(name: str, tensor: Optional[torch.Tensor]) -> AttentionTrace:
+def _attention_trace(
+    name: str,
+    tensor: Optional[torch.Tensor],
+    *,
+    q_projection: Optional[TensorSummary] = None,
+    k_projection: Optional[TensorSummary] = None,
+    v_projection: Optional[TensorSummary] = None,
+) -> AttentionTrace:
     if tensor is None:
         return AttentionTrace(
             name=name,
             shape=(),
             entropy=None,
+            per_head_entropy=None,
             max_probability=None,
             mean_probability=None,
+            q_projection=q_projection,
+            k_projection=k_projection,
+            v_projection=v_projection,
             available=False,
             reason="attention weights unavailable; use_sdpa=True does not return weights",
         )
 
     values = tensor.detach().float()
     clamped = values.clamp_min(1e-12)
-    entropy = -(clamped * clamped.log()).sum(dim=-1).mean()
+    token_entropy = -(clamped * clamped.log()).sum(dim=-1)
+    entropy = token_entropy.mean()
+    per_head_entropy = token_entropy.mean(dim=(0, 2))
+    weights = values.mean(dim=0).cpu().tolist()
     return AttentionTrace(
         name=name,
         shape=tuple(values.shape),
         entropy=float(entropy.cpu()),
+        per_head_entropy=[float(item) for item in per_head_entropy.cpu().tolist()],
         max_probability=float(values.max().cpu()),
         mean_probability=float(values.mean().cpu()),
+        q_projection=q_projection,
+        k_projection=k_projection,
+        v_projection=v_projection,
+        weights=weights,
     )
 
 
@@ -217,12 +460,16 @@ def _logit_trace(output: torch.Tensor, top_k: int) -> Optional[LogitTrace]:
     k = min(top_k, values.size(-1))
     top_values, top_indices = torch.topk(values, k=k, dim=-1)
     top_probabilities = torch.gather(values.softmax(dim=-1), dim=-1, index=top_indices)
+    probabilities = values.softmax(dim=-1)
+    entropy = -(probabilities.clamp_min(1e-12) * probabilities.clamp_min(1e-12).log()).sum(dim=-1)
     return LogitTrace(
         shape=tuple(values.shape),
         top_k=k,
         token_ids=top_indices.cpu().tolist(),
         values=top_values.cpu().tolist(),
         probabilities=top_probabilities.cpu().tolist(),
+        entropy=entropy.cpu().tolist(),
+        top_token_ids=top_indices[..., 0].cpu().tolist(),
     )
 
 
@@ -455,7 +702,11 @@ def _build_layer_traces(
             and state.output_tensor is not None
             and state.input_tensor.shape == state.output_tensor.shape
         ):
-            residual_delta_norm = _safe_norm(state.output_tensor - state.input_tensor)
+            residual_delta = state.output_tensor - state.input_tensor
+            residual_delta_norm = _safe_norm(residual_delta)
+            residual_by_token = residual_delta.detach().float().norm(dim=-1).cpu().tolist()
+        else:
+            residual_by_token = None
         layers.append(
             LayerTrace(
                 name=name,
@@ -466,10 +717,13 @@ def _build_layer_traces(
                 input_norm=input_norm,
                 output_norm=state.output.norm,
                 residual_delta_norm=residual_delta_norm,
+                residual_by_token=residual_by_token,
                 self_attention_output_norm=state.self_attention_output_norm,
                 cross_attention_output_norm=state.cross_attention_output_norm,
                 mlp_activation_norm=state.mlp_activation_norm,
                 mlp_output_norm=state.mlp_output_norm,
+                mlp_activation=state.mlp_activation,
+                mlp_output=state.mlp_output,
             )
         )
     return layers
@@ -521,7 +775,7 @@ def capture_transformer_trace(
 
     def attention_hook(
         name: str,
-        _module: torch.nn.Module,
+        module: torch.nn.Module,
         _inputs: tuple[Any, ...],
         out: Any,
     ) -> None:
@@ -540,7 +794,23 @@ def capture_transformer_trace(
         if isinstance(out, (tuple, list)) and len(out) > 1:
             candidate = out[1]
             attn = candidate if isinstance(candidate, torch.Tensor) else None
-        attentions.append(_attention_trace(name, attn))
+        q_summary = None
+        k_summary = None
+        v_summary = None
+        if len(_inputs) >= 3 and all(isinstance(item, torch.Tensor) for item in _inputs[:3]):
+            attention_module = cast(Any, module)
+            q_summary = _summary(f"{name}.q_projection", attention_module.wq(_inputs[0]))
+            k_summary = _summary(f"{name}.k_projection", attention_module.wk(_inputs[1]))
+            v_summary = _summary(f"{name}.v_projection", attention_module.wv(_inputs[2]))
+        attentions.append(
+            _attention_trace(
+                name,
+                attn,
+                q_projection=q_summary,
+                k_projection=k_summary,
+                v_projection=v_summary,
+            )
+        )
 
     def feed_forward_hook(
         name: str,
@@ -553,10 +823,12 @@ def capture_transformer_trace(
         tensor = _as_tensor(out)
         if tensor is not None:
             state.mlp_output_norm = _safe_norm(tensor)
+            state.mlp_output = _summary(f"{name}.output", tensor)
         if inputs and isinstance(inputs[0], torch.Tensor):
             activation = _feed_forward_activation(module, inputs[0])
             if activation is not None:
                 state.mlp_activation_norm = _safe_norm(activation)
+                state.mlp_activation = _summary(f"{name}.activation", activation)
 
     for name, module in model.named_modules():
         if _is_layer_name(name, layer_name_fragments):

@@ -6,7 +6,12 @@ import torch
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
 from miniformer.model.transformer import Transformer
-from miniformer.visualization import capture_transformer_trace, plot_attention, plot_trace_summary
+from miniformer.visualization import (
+    capture_transformer_trace,
+    plot_attention,
+    plot_trace_summary,
+    save_trace_html,
+)
 
 matplotlib.use("Agg")
 
@@ -38,14 +43,24 @@ def test_capture_transformer_trace_encoder():
     assert [layer.name for layer in trace.layers] == ["encoder.layers.0", "encoder.layers.1"]
     assert all(layer.residual_delta_norm is not None for layer in trace.layers)
     assert all(layer.residual_delta_norm > 0 for layer in trace.layers)
+    assert all(layer.residual_by_token is not None for layer in trace.layers)
     assert all(layer.self_attention_output_norm is not None for layer in trace.layers)
     assert all(layer.mlp_activation_norm is not None for layer in trace.layers)
+    assert all(layer.mlp_activation is not None for layer in trace.layers)
+    assert all(layer.mlp_output is not None for layer in trace.layers)
     assert all(layer.mlp_output_norm is not None for layer in trace.layers)
     assert len(trace.attentions) == 2
     assert all(attn.entropy is not None and attn.entropy >= 0 for attn in trace.attentions)
+    assert all(attn.per_head_entropy is not None for attn in trace.attentions)
+    assert all(attn.q_projection is not None for attn in trace.attentions)
+    assert all(attn.k_projection is not None for attn in trace.attentions)
+    assert all(attn.v_projection is not None for attn in trace.attentions)
+    assert all(attn.weights is not None for attn in trace.attentions)
     assert trace.logits is not None
     assert trace.logits.shape == (2, 5, 30)
     assert trace.logits.top_k == 3
+    assert len(trace.logits.top_token_ids[0]) == 5
+    assert len(trace.logits.entropy[0]) == 5
     assert trace.cache.supported
     assert trace.cache.allclose
     assert trace.cache.max_abs_diff is not None
@@ -75,8 +90,19 @@ def test_capture_transformer_trace_json_round_trip(tmp_path):
     loaded = json.loads(path.read_text())
     assert loaded["output_shape"] == [1, 4, 30]
     assert loaded["logits"]["top_k"] == 2
+    assert loaded["logits"]["top_token_ids"]
+    assert loaded["layers"][0]["residual_by_token"]
+    assert loaded["attentions"][0]["per_head_entropy"]
     assert loaded["layers"][0]["input_norm"] > 0
     assert json.loads(trace.to_json())["attentions"][0]["available"]
+
+    html_path = tmp_path / "trace.html"
+    trace.to_html(html_path, tokens=["a", "b", "c", "d"])
+    html = html_path.read_text()
+    assert "Miniformer Trace" in html
+    assert "Residual Norms" in html
+    assert "Q/K/V Projection Summaries" in html
+    assert "Logit Evolution" in html
 
 
 def test_capture_transformer_trace_seq2seq_and_plot():
@@ -129,7 +155,32 @@ def test_trace_reports_unavailable_sdpa_attention():
     assert len(trace.attentions) == 1
     assert not trace.attentions[0].available
     assert trace.attentions[0].entropy is None
+    assert trace.attentions[0].q_projection is not None
     assert "use_sdpa=True" in trace.attentions[0].reason
+
+
+def test_save_trace_html_reports_unavailable_sdpa_attention(tmp_path):
+    model = Transformer(
+        TransformerConfig(
+            vocab_size=30,
+            d_model=16,
+            n_heads=2,
+            n_layers=1,
+            d_ff=32,
+            dropout=0.0,
+            output_mode="vocab",
+            use_sdpa=True,
+        )
+    )
+    input_ids = torch.randint(1, 30, (1, 4))
+    trace = capture_transformer_trace(model, input_ids)
+    path = tmp_path / "sdpa.html"
+
+    save_trace_html(trace, path, tokens=["w0", "w1", "w2", "w3"])
+
+    html = path.read_text()
+    assert "use_sdpa=True" in html
+    assert "Cache Status" in html
 
 
 def test_plot_attention_rejects_unavailable_attention_weights():

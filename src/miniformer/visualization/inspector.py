@@ -9,6 +9,7 @@ from miniformer.inspect import (
     TransformerTrace,
     capture_transformer_trace,
     plot_trace_summary,
+    save_trace_html,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "TransformerTrace",
     "capture_transformer_trace",
     "plot_trace_summary",
+    "save_trace_html",
 ]

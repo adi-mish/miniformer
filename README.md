@@ -266,11 +266,19 @@ print(trace.logits.token_ids[0][0])
 print(trace.cache.allclose)
 
 trace.save_json("trace.json")
+trace.to_html("trace.html", tokens=[str(i) for i in input_ids[0].tolist()])
 
 fig, ax = plot_trace_summary(trace)
 ```
 
-You can also call `model.trace(input_ids)` or `seq2seq_model.trace(src_ids, tgt_ids)`. Traces include per-layer residual norms, self-attention and cross-attention output norms, MLP activation/output norms, attention entropy when attention weights are available, top-k output predictions when the output is logit-like, and optional cached-vs-uncached consistency metadata.
+You can also call `model.trace(input_ids)` or `seq2seq_model.trace(src_ids, tgt_ids)`.
+Traces include per-token residual norm evolution, self-attention and cross-attention
+output norms, per-head attention entropy, Q/K/V projection summaries, MLP
+activation/output summaries, top-k logit evolution by token when the output is
+logit-like, raw attention heatmaps when attention weights are available, and
+optional cached-vs-uncached consistency metadata. `trace.to_html(...)` and
+`save_trace_html(trace, ...)` write a self-contained static report that opens
+directly in a browser.
 
 The old `miniformer.visualization.capture_transformer_trace` import path still works, but `miniformer.inspect` is the canonical API. For raw attention heatmaps, use `plot_attention(model.get_attention_weights(input_ids))`. Raw attention tensors are only available when `use_sdpa=False`; PyTorch's SDPA path does not return attention weights, so the trace marks those attention summaries as unavailable instead of pretending weights exist.
 
