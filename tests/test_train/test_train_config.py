@@ -11,7 +11,7 @@ def test_defaults(tmp_path):
     cfg = TrainConfig()
     assert cfg.lr == 5e-4
     assert cfg.batch_size == 32
-    assert cfg.logger == "tensorboard"
+    assert cfg.logger == "csv"
 
     # test save functionality
     cfg.experiment_name = "testexp"
@@ -22,13 +22,13 @@ def test_defaults(tmp_path):
 
 
 def test_from_cli(monkeypatch):
-    args = ["prog", "--lr", "0.1", "--batch_size", "64", "--logger", "wandb"]
+    args = ["prog", "--lr", "0.1", "--batch_size", "64", "--logger", "none"]
     monkeypatch.setattr(sys, "argv", args)
     cfg = TrainConfig.from_cli()
     assert isinstance(cfg, TrainConfig)
     assert cfg.lr == pytest.approx(0.1)
     assert cfg.batch_size == 64
-    assert cfg.logger == "wandb"
+    assert cfg.logger == "none"
 
 
 def test_from_cli_model_config_json(monkeypatch):

@@ -58,7 +58,8 @@ def test_gradient_accumulation_equivalence():
         d_model=32,
         n_heads=4,
         n_layers=2,
-        output_dim=50
+        output_dim=50,
+        dropout=0.0,
     )
     
     # Create two identical models

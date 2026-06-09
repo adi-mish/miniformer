@@ -12,39 +12,33 @@ dependencies = [
     "torch>=2.0.0",
     "matplotlib>=3.7.0",
     "tqdm>=4.65.0",
-    "jupyterlab>=4.0.0",
     "pandas>=2.0.0",
     "scikit-learn>=1.2.0",
-    "pytest>=8.4.1,<9.0.0",
-    "hypothesis>=6.0.0",
-    "pytest-cov (>=6.2.1,<7.0.0)",
-    "lightning (>=2.5.2,<3.0.0)",
-    "torchmetrics (>=1.7.3,<2.0.0)",
-    "transformers (>=4.53.0,<5.0.0)",
-    "tensorboard (>=2.19.0,<3.0.0)",
-    "standard-imghdr (>=3.13.0,<4.0.0)",
-    "tensorboardx (>=2.6.4,<3.0.0)"
+    "transformers>=4.53.0,<5.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
+    "pytest>=8.4.1,<9.0.0",
+    "hypothesis>=6.0.0",
+    "pytest-cov>=6.2.1,<7.0.0",
     "black>=23.0.0",
     "isort>=5.12.0",
     "flake8>=6.0.0",
     "mypy>=1.0.0",
+    "jupyterlab>=4.0.0",
 ]
 docs = [
     "sphinx>=6.0.0",
     "sphinx-rtd-theme>=1.2.0",
 ]
 
-[tool.poetry]
-packages = [{include = "miniformer", from = "src"}]
-
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/miniformer"]
 
 [tool.black]
 line-length = 100

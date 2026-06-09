@@ -33,7 +33,7 @@ class TrainConfig:
     precision: Literal[16, 32, 64, "bf16"] = "bf16"
 
     # --- logging / callbacks -----------------------------------------------
-    logger: Literal["tensorboard", "wandb", "csv", "none"] = "tensorboard"
+    logger: Literal["csv", "none"] = "csv"
     checkpoint_metric: str = "val_loss"
     early_stopping_patience: int = 3
 

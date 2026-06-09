@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent / 'src'))
 
 from miniformer.train.train_config import TrainConfig
-from miniformer.train.module import MiniFormerLitModule
+from miniformer.train.module import MiniFormerModule
 from miniformer.model.transformer import Transformer, TransformerConfig
 
 
@@ -55,16 +55,8 @@ class TestMultiTaskConsistency:
             cfg.model = "encoder" if task != "language_modeling" else "seq2seq"
             
             # Initialize model
-            model = MiniFormerLitModule(cfg)
+            model = MiniFormerModule(cfg)
             models[task] = model
-            
-            # Verify model has proper metrics set up
-            if task == "classification":
-                assert hasattr(model, "val_acc"), "Classification model missing accuracy metric"
-            elif task == "regression":
-                assert hasattr(model, "val_mae"), "Regression model missing MAE metric"
-            elif task == "language_modeling":
-                assert hasattr(model, "val_ppl"), "Language model missing perplexity metric"
         
         # Create a regression model with the same architecture
         reg_cfg = TrainConfig()
@@ -78,7 +70,7 @@ class TestMultiTaskConsistency:
         reg_cfg.model_config = base_config.copy()
         reg_cfg.model_config["output_dim"] = 1  # Regression output
         
-        reg_model = MiniFormerLitModule(reg_cfg)
+        reg_model = MiniFormerModule(reg_cfg)
         
         # We can't directly load state dict because output layer is different size
         # But we can verify that all matching parameters can be copied

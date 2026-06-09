@@ -1,94 +1,92 @@
-import sys
-import pathlib
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent / 'src'))
+import torch
 
-from types import SimpleNamespace
-import miniformer.train.trainer as trainer_mod
+from miniformer.train.train_config import TrainConfig
+from miniformer.train.trainer import evaluate, seed_everything, train_model, train_one_epoch
 
 
-def test_main_default(monkeypatch):
-    # prepare dummy config
-    cfg = SimpleNamespace(
-        seed=123,
+class TinyModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.tensor([1.0]))
+        self.cfg = None
+
+    def training_step(self, batch, batch_idx=0):
+        x, y = batch
+        return ((x * self.weight - y) ** 2).mean()
+
+    def validation_step(self, batch, batch_idx=0):
+        return {"val_loss": float(self.training_step(batch, batch_idx).detach())}
+
+    def configure_optimizers(self, steps_per_epoch=None):
+        return torch.optim.SGD(self.parameters(), lr=0.1), None
+
+    def save_checkpoint(self, path, *, optimizer=None, epoch=0, metrics=None):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save({"state_dict": self.state_dict(), "metrics": metrics or {}}, path)
+
+
+def test_seed_everything_reproducible():
+    seed_everything(123)
+    first = torch.rand(2)
+    seed_everything(123)
+    second = torch.rand(2)
+    assert torch.equal(first, second)
+
+
+def test_train_one_epoch_updates_parameters():
+    module = TinyModule()
+    loader = [(torch.tensor([1.0]), torch.tensor([0.0]))]
+    optimizer, scheduler = module.configure_optimizers()
+
+    before = module.weight.detach().clone()
+    loss = train_one_epoch(module, loader, optimizer, scheduler)
+
+    assert loss > 0
+    assert not torch.equal(before, module.weight.detach())
+
+
+def test_evaluate_averages_metrics():
+    module = TinyModule()
+    loader = [
+        (torch.tensor([1.0]), torch.tensor([0.0])),
+        (torch.tensor([2.0]), torch.tensor([0.0])),
+    ]
+    metrics = evaluate(module, loader)
+    assert metrics["val_loss"] == 2.5
+
+
+def test_train_model_smoke(tmp_path):
+    train_path = tmp_path / "train.jsonl"
+    val_path = tmp_path / "val.jsonl"
+    train_path.write_text('{"input": "aa", "label": 0}\n{"input": "bb", "label": 1}\n')
+    val_path.write_text('{"input": "aa", "label": 0}\n{"input": "bb", "label": 1}\n')
+
+    cfg = TrainConfig(
         task="classification",
-        test_path="",
-        work_dir="wd",
-        experiment_name="exp",
-        logger="tensorboard",
-        early_stopping_patience=1,
-        checkpoint_metric="val_loss",
-        gpus=0,
+        train_path=str(train_path),
+        val_path=str(val_path),
+        batch_size=2,
+        num_workers=0,
+        shuffle_train=False,
         max_epochs=1,
-        precision=32,
-        accumulate_grad_batches=1,
-        gradient_clip_val=0.5
+        gpus=0,
+        logger="none",
+        early_stopping_patience=0,
+        model_config={
+            "vocab_size": 20,
+            "d_model": 8,
+            "n_heads": 2,
+            "n_layers": 1,
+            "d_ff": 16,
+            "dropout": 0.0,
+            "output_dim": 2,
+        },
+        work_dir=str(tmp_path),
+        experiment_name="smoke",
     )
-    # patch from_cli
-    monkeypatch.setattr(trainer_mod.TrainConfig, "from_cli", staticmethod(lambda: cfg))
 
-    calls = []
-    # patch seed_everything
-    monkeypatch.setattr(trainer_mod.pl, "seed_everything", lambda *args, **kwargs: calls.append(("seed", args, kwargs)))
-    # dummy DataModule and Model
-    dummy_dm = object()
-    dummy_model = object()
-    monkeypatch.setattr(trainer_mod, "MiniFormerDataModule", lambda cfg, tok: dummy_dm)
-    monkeypatch.setattr(trainer_mod, "MiniFormerLitModule", lambda cfg: dummy_model)
-    # patch loggers - need to match the actual function signatures
-    class DummyLogger:
+    metrics = train_model(cfg)
 
-        def __init__(self, *args, **kwargs):
-            self.log_dir = "/fake/log/dir/version_0"
-
-        def __str__(self):
-            return "tb_logger"
-
-    def create_logger(*args, **kwargs):
-        return DummyLogger()
-    
-    monkeypatch.setattr(trainer_mod, "TensorBoardLogger", create_logger)
-    monkeypatch.setattr(trainer_mod, "WandbLogger", create_logger)
-    monkeypatch.setattr(trainer_mod, "CSVLogger", create_logger)
-    # patch callbacks
-
-    def create_callback(**kwargs):
-        return "ckpt_cb"
-    
-    monkeypatch.setattr(trainer_mod, "ModelCheckpoint", create_callback)
-    monkeypatch.setattr(trainer_mod, "EarlyStopping", lambda **kwargs: "es_cb")
-    # dummy Trainer
-
-    class DummyTrainer:
-
-        def __init__(self, **kwargs):
-            calls.append(("trainer_init", kwargs))
-
-        def fit(self, model, datamodule):
-            calls.append(("fit", model, datamodule))
-
-        def validate(self, model, datamodule, verbose=False):
-            calls.append(("validate", model, datamodule, verbose))
-
-        def test(self, datamodule):
-            calls.append(("test", datamodule))
-    monkeypatch.setattr(trainer_mod.pl, "Trainer", DummyTrainer)
-
-    # run main
-    trainer_mod.main()
-
-    # assertions
-    assert ("seed", (cfg.seed,), {"workers": True}) in calls
-    # Trainer instantiation
-    trainer_calls = [c for c in calls if c[0] == "trainer_init"]
-    assert trainer_calls, "Trainer was not instantiated"
-    init_kwargs = trainer_calls[0][1]
-    assert init_kwargs["max_epochs"] == cfg.max_epochs
-    assert init_kwargs["accelerator"] == "cpu"
-    assert init_kwargs["devices"] == 1
-    assert str(init_kwargs["logger"]) == "tb_logger"
-    # fit call
-    assert ("fit", dummy_model, dummy_dm) in calls
-    # validate call (always happens, even with empty cfg.test_path)
-    assert ("validate", dummy_model, dummy_dm, False) in calls
-    # no test call
-    assert all(c[0] != "test" for c in calls)
+    assert "val_loss" in metrics
+    assert (tmp_path / "smoke" / "checkpoints" / "best.pt").exists()
+    assert (tmp_path / "smoke" / "checkpoints" / "last.pt").exists()

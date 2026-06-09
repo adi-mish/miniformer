@@ -25,6 +25,7 @@ The library started as a learning exercise but evolved into something useful for
 - [Basic Usage](#basic-usage)
   - [Command Line Training](#command-line-training)
   - [Python API](#python-api)
+- [Visualization](#visualization)
 - [Data Formats](#data-formats)
 - [Architecture Details](#architecture-details)
 - [Training and Configuration](#training-and-configuration)
@@ -44,7 +45,7 @@ I built this around the standard transformer architecture from "Attention Is All
 - **Encoder-decoder (seq2seq)**: Handles translation, summarization, or generation tasks
 - **Multi-head attention** with optional rotary position embeddings (RoPE)
 - **Feed-forward networks** supporting GELU, ReLU, and SwiGLU activations
-- **PyTorch Lightning integration** for training without boilerplate
+- **Plain PyTorch training utilities** for small JSONL datasets
 - **KV-caching** for faster autoregressive generation
 
 The code is modular—you can swap out attention mechanisms, activations, or position encodings through config files rather than rewriting classes.
@@ -56,26 +57,22 @@ Clone and install dependencies. You'll need Python 3.9+ and PyTorch 2.0+:
 ```bash
 git clone https://github.com/adi-mish/miniformer.git
 cd miniformer
-poetry install
+uv sync
 ```
 
 For development with additional tools like linting and documentation:
 
 ```bash
-poetry install --extras "dev docs"
-# Or install all optional dependencies
-poetry install --all-extras
+uv sync --extra dev --extra docs
 ```
 
-To run commands in the Poetry environment:
+To run commands in the uv environment:
 
 ```bash
-poetry shell  # Activate the virtual environment
-# OR
-poetry run python -m miniformer.train.trainer --help  # Run commands directly
+uv run python -m miniformer.train.trainer --help
 ```
 
-**Alternative installation with pip**: If you prefer not to use Poetry, you can install with pip, though Poetry is recommended for development:
+**Alternative installation with pip**:
 
 ```bash
 pip install -e .              # Basic installation
@@ -100,7 +97,7 @@ miniformer/
 │   │   └── seq2seq_transformer.py # Full encoder-decoder
 │   ├── train/               # Training infrastructure
 │   │   ├── datamodule.py    # Data loading (JSONL format)
-│   │   ├── module.py        # Lightning wrapper
+│   │   ├── module.py        # Plain PyTorch training wrapper
 │   │   ├── trainer.py       # CLI entry point
 │   │   └── train_config.py  # Training configuration
 │   ├── utils/               # Utility functions
@@ -118,8 +115,7 @@ miniformer/
 The simplest way to train a model is through the CLI. Here's a language modeling example:
 
 ```bash
-# Using Poetry (recommended)
-poetry run python -m miniformer.train.trainer \
+uv run python -m miniformer.train.trainer \
   --train_path data/train.jsonl \
   --val_path data/val.jsonl \
   --task language_modeling \
@@ -131,21 +127,15 @@ poetry run python -m miniformer.train.trainer \
   --scheduler cosine \
   --warmup_steps 100 \
   --gradient_clip_val 1.0 \
-  --logger tensorboard \
+  --logger csv \
   --work_dir "./runs" \
   --experiment_name "my_lm"
-
-# Or if you've activated the Poetry shell with `poetry shell`
-python -m miniformer.train.trainer \
-  --train_path data/train.jsonl \
-  --val_path data/val.jsonl \
-  # ... same arguments as above
 ```
 
 For classification tasks, swap the task and model config:
 
 ```bash
-poetry run python -m miniformer.train.trainer \
+uv run python -m miniformer.train.trainer \
   --train_path data/classification_train.jsonl \
   --val_path data/classification_val.jsonl \
   --task classification \
@@ -226,6 +216,31 @@ generated = model.generate(
 
 ---
 
+## Visualization
+
+For a quick look inside a forward pass, use the tracing helpers:
+
+```python
+import torch
+from miniformer.config.model_config import TransformerConfig
+from miniformer.model.transformer import Transformer
+from miniformer.visualization import capture_transformer_trace, plot_trace_summary
+
+model = Transformer(TransformerConfig(vocab_size=1000, d_model=64, n_heads=4, n_layers=2))
+input_ids = torch.randint(1, 1000, (2, 16))
+
+trace = capture_transformer_trace(model, input_ids)
+print(trace.output_shape)
+print(trace.layers[0])
+print(trace.attentions[0])
+
+fig, ax = plot_trace_summary(trace)
+```
+
+`capture_transformer_trace` records per-layer activation shape, mean, standard deviation, norm, and attention entropy. For raw attention heatmaps, use `plot_attention(model.get_attention_weights(input_ids))`.
+
+---
+
 ## Data Formats
 
 The library expects JSONL files (one JSON object per line). The format depends on your task:
@@ -264,11 +279,11 @@ Both models share the same underlying components but wire them together differen
 
 ### Attention Implementation
 
-The `MultiHeadAttention` class handles the core attention mechanism. A few things I learned while building it:
+The `MultiHeadAttention` class handles the core attention mechanism:
 
-- **Rotary Position Embeddings (RoPE)**: These work better than learned positional embeddings for longer sequences. You can enable them with `rotary_pct` in the config (0.0 = disabled, 1.0 = full RoPE).
-- **KV-caching**: Essential for fast generation. The implementation caches key-value pairs across decoding steps.
-- **SDPA integration**: I started adding PyTorch 2.0's scaled dot-product attention but disabled it for now since it caused some compatibility issues during testing.
+- **Rotary Position Embeddings (RoPE)**: Enable with `rotary_pct` in the config (0.0 = disabled, 1.0 = full RoPE).
+- **KV-caching**: The decoder caches key-value pairs across generation steps.
+- **SDPA integration**: PyTorch scaled dot-product attention can be enabled with `use_sdpa=True` in `TransformerConfig`.
 
 ### Position Encodings
 
@@ -327,9 +342,8 @@ config = TrainConfig(
     scheduler="cosine",                # "linear", "onecycle", "none"
     warmup_steps=1000,
     gradient_clip_val=1.0,
-    logger="tensorboard",              # "wandb", "csv", "none"
-    gpus=1,
-    precision="bf16"                   # Use bfloat16 for better performance
+    logger="csv",                      # "csv", "none"
+    gpus=1                             # Uses CUDA when available and gpus > 0
 )
 ```
 
@@ -414,18 +428,18 @@ I wrote a fairly comprehensive test suite to catch regressions. Run it with:
 
 ```bash
 # All tests
-poetry run pytest tests/
+uv run --extra dev pytest tests/
 
 # With coverage
-poetry run pytest tests/ --cov=miniformer
+uv run --extra dev pytest tests/ --cov=miniformer
 
 # Specific test groups
-poetry run pytest tests/test_model/      # Model architecture tests
-poetry run pytest tests/test_train/      # Training pipeline tests
-poetry run pytest tests/test_integration/ # End-to-end tests
+uv run --extra dev pytest tests/test_model/       # Model architecture tests
+uv run --extra dev pytest tests/test_train/       # Training pipeline tests
+uv run --extra dev pytest tests/test_integration/ # End-to-end tests
 
 # Pattern matching
-poetry run pytest tests/ -k "attention"  # Only attention-related tests
+uv run --extra dev pytest tests/ -k "attention"  # Only attention-related tests
 ```
 
 The tests cover:
@@ -445,15 +459,16 @@ The library currently handles:
 - ✅ **Full encoder and seq2seq architectures**
 - ✅ **Multi-head attention with RoPE support**
 - ✅ **SwiGLU and other gated activations**
-- ✅ **PyTorch Lightning training pipeline**
+- ✅ **Plain PyTorch training pipeline**
 - ✅ **KV-cache for generation**
+- ✅ **Forward-pass visualization traces and attention plots**
 - ✅ **Classification, regression, and language modeling tasks**
 - ✅ **Proper initialization and numerical stability**
 
 ### Current Limitations
 
 Some things I haven't gotten to yet:
-- ❌ **FlashAttention integration**: Started this but disabled due to compatibility issues
+- ❌ **FlashAttention-specific integration**: PyTorch SDPA is available, but direct FlashAttention 2 APIs are not wired in
 - ❌ **Beam search**: Only greedy and sampling generation for now
 - ❌ **Model parallelism**: Single-GPU training only
 - ❌ **Quantization**: No INT8/FP16 optimization yet
@@ -462,7 +477,7 @@ Some things I haven't gotten to yet:
 ### What I'm Working On
 
 Near-term improvements (next few months):
-- **FlashAttention 2**: Proper integration without the current compatibility issues
+- **FlashAttention 2**: Direct integration beyond PyTorch SDPA
 - **Beam search decoding**: For better generation quality
 - **Gradient checkpointing**: Memory-efficient training for larger models
 - **Better examples**: More realistic use cases and tutorials
@@ -475,7 +490,7 @@ Longer-term ideas:
 
 ### Known Issues
 
-- The SDPA (Scaled Dot-Product Attention) integration is disabled because it caused some test failures on certain PyTorch versions
+- Direct FlashAttention 2 integration is not implemented; use PyTorch SDPA via `use_sdpa=True` where supported
 - Generation with very long sequences can be slow without FlashAttention
 - The tokenizer integration assumes HuggingFace transformers—you'll need to adapt for custom tokenizers
 
@@ -494,5 +509,5 @@ The papers that actually helped me build this:
 - Vaswani, A., et al. (2017). [Attention Is All You Need](https://arxiv.org/abs/1706.03762) - The original transformer paper
 - Su, J., et al. (2021). [RoFormer: Enhanced Transformer with Rotary Position Embedding](https://arxiv.org/abs/2104.09864) - RoPE implementation
 - Shazeer, N. (2020). [GLU Variants Improve Transformer](https://arxiv.org/abs/2002.05202) - SwiGLU and other gated activations
-- Dao, T., et al. (2022). [FlashAttention: Fast and Memory-Efficient Exact Attention](https://arxiv.org/abs/2205.14135) - Memory-efficient attention (working on integrating this)
+- Dao, T., et al. (2022). [FlashAttention: Fast and Memory-Efficient Exact Attention](https://arxiv.org/abs/2205.14135) - Memory-efficient attention
 - Xiong, R., et al. (2020). [On Layer Normalization in the Transformer Architecture](https://arxiv.org/abs/2002.04745) - Pre-norm vs post-norm

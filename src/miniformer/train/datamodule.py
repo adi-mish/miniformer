@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import os
 import torch
 from torch.utils.data import DataLoader, Dataset
-import lightning as L  # PyTorch Lightning ≥ 2.x
 
 class JSONLinesDataset(Dataset):
     """A minimal Dataset reading line-separated JSON records."""
@@ -40,10 +41,9 @@ class JSONLinesDataset(Dataset):
             val = item.get("value", item.get("labels"))
             return {"input": item["input"], "labels": torch.tensor(val, dtype=torch.float)}
 
-class MiniFormerDataModule(L.LightningDataModule):
-    """Lightweight DataModule placeholder - replace with task-specific logic."""
+class MiniFormerDataModule:
+    """Small data loader factory for JSONL datasets."""
     def __init__(self, cfg, tokenizer=None):
-        super().__init__()
         self.cfg = cfg
         self.tokenizer = tokenizer
 
@@ -62,7 +62,7 @@ class MiniFormerDataModule(L.LightningDataModule):
             shuffle=getattr(self.cfg, "shuffle_train", True),
             num_workers=self.cfg.num_workers,
             collate_fn=self._collate_fn,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
         )
 
     def val_dataloader(self):
@@ -72,7 +72,7 @@ class MiniFormerDataModule(L.LightningDataModule):
             shuffle=False,
             num_workers=self.cfg.num_workers,
             collate_fn=self._collate_fn,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
         )
 
     def test_dataloader(self):
@@ -82,7 +82,7 @@ class MiniFormerDataModule(L.LightningDataModule):
             shuffle=False,
             num_workers=self.cfg.num_workers,
             collate_fn=self._collate_fn,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
         )
 
     def _collate_fn(self, batch):
