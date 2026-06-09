@@ -41,6 +41,7 @@ class TrainConfig:
     # --- model / task -------------------------------------------------------
     task: Literal["language_modeling", "classification", "regression"] = "language_modeling"
     model: Literal["seq2seq", "encoder"] = "seq2seq"
+    pooling: Literal["first", "mean", "masked_mean"] = "masked_mean"
     model_config: dict[str, Any] = field(default_factory=dict)
 
     def save(self, path: str):

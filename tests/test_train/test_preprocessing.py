@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from miniformer.data.preprocessing import (
+    attention_mask_from_lengths,
     collate_records,
     encode_text,
     encode_text_batch,
@@ -40,6 +41,13 @@ def test_pad_token_sequences_rejects_empty_sequences():
         pad_token_sequences([torch.tensor([], dtype=torch.long)])
 
 
+def test_attention_mask_from_lengths():
+    mask = attention_mask_from_lengths([2, 1], max_len=3)
+
+    assert mask.dtype == torch.bool
+    assert mask.tolist() == [[True, True, False], [True, False, False]]
+
+
 def test_collate_records_string_classification_returns_tensor_batch():
     batch = collate_records(
         [{"input": "alpha beta", "label": 1}, {"input": "alpha", "labels": 0}],
@@ -47,8 +55,9 @@ def test_collate_records_string_classification_returns_tensor_batch():
         vocab_size=50,
     )
 
-    assert set(batch) == {"input_ids", "labels"}
+    assert set(batch) == {"input_ids", "attention_mask", "labels"}
     assert batch["input_ids"].shape == (2, 2)
+    assert batch["attention_mask"].tolist() == [[True, True], [True, False]]
     assert batch["labels"].dtype == torch.long
     assert batch["labels"].tolist() == [1, 0]
 
@@ -61,6 +70,7 @@ def test_collate_records_string_regression_accepts_value_field():
     )
 
     assert batch["input_ids"].shape == (2, 1)
+    assert batch["attention_mask"].tolist() == [[True], [True]]
     assert batch["labels"].dtype == torch.float32
     assert batch["labels"].tolist() == pytest.approx([1.5, 2.5])
 
@@ -77,6 +87,7 @@ def test_collate_records_numeric_features_are_padded_and_typed():
 
     assert torch.equal(batch["input"][0, 0], torch.tensor([1.0, 2.0]))
     assert torch.equal(batch["input"][0, 1], torch.tensor([0.0, 0.0]))
+    assert batch["attention_mask"].tolist() == [[True, False], [True, True]]
     assert batch["labels"].tolist() == [1, 0]
 
 
@@ -100,4 +111,5 @@ def test_collate_records_language_modeling_pads_labels_with_ignore_index():
     )
 
     assert batch["input_ids"].tolist() == [[1, 2], [4, 0]]
+    assert batch["attention_mask"].tolist() == [[True, True], [True, False]]
     assert batch["labels"].tolist() == [[2, 3], [5, -100]]

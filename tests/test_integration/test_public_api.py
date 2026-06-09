@@ -11,7 +11,12 @@ def test_top_level_exports_data_helpers():
     )
 
     assert batch["input_ids"].shape == (2, 2)
+    assert batch["attention_mask"].tolist() == [[True, True], [True, False]]
     assert batch["labels"].tolist() == [1, 0]
+    assert miniformer.attention_mask_from_lengths([1, 2]).tolist() == [
+        [True, False],
+        [True, True],
+    ]
     assert miniformer.encode_text("alpha", vocab_size=32).dtype == torch.long
     assert callable(miniformer.encode_text_batch)
     assert callable(miniformer.pad_token_sequences)

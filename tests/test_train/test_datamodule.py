@@ -91,6 +91,7 @@ def test_datamodule_lm(tmp_path):
     # batch should be a dict with padded tensors
     assert batch["input_ids"].shape[0] == 2
     assert batch["labels"].shape == batch["input_ids"].shape
+    assert batch["attention_mask"].shape == batch["input_ids"].shape
     # second sample is length 1, so padded positions should be -100
     assert (batch["labels"][1, 1:] == -100).all()
 
@@ -112,9 +113,10 @@ def test_datamodule_classification(tmp_path):
     dm.setup()
     dl = dm.train_dataloader()
     batch = next(iter(dl))
-    assert set(batch) == {"input_ids", "labels"}
+    assert set(batch) == {"input_ids", "attention_mask", "labels"}
     assert batch["input_ids"].shape == (2, 1)
     assert batch["input_ids"].dtype == torch.long
+    assert batch["attention_mask"].tolist() == [[True], [True]]
     assert batch["labels"].tolist() == [0, 1]
 
 
@@ -141,6 +143,7 @@ def test_datamodule_numeric_features_collate_dtype(tmp_path):
 
     assert batch["input"].shape == (2, 2, 2)
     assert batch["input"].dtype == torch.float32
+    assert batch["attention_mask"].tolist() == [[True, False], [True, True]]
     assert batch["labels"].dtype == torch.long
 
 

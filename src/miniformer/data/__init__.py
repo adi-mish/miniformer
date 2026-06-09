@@ -2,6 +2,7 @@
 
 from miniformer.data.preprocessing import (
     TextTokenizer,
+    attention_mask_from_lengths,
     collate_records,
     encode_text,
     encode_text_batch,
@@ -10,6 +11,7 @@ from miniformer.data.preprocessing import (
 
 __all__ = [
     "TextTokenizer",
+    "attention_mask_from_lengths",
     "collate_records",
     "encode_text",
     "encode_text_batch",

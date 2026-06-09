@@ -52,6 +52,23 @@ def pad_token_sequences(
     return padded
 
 
+def attention_mask_from_lengths(
+    lengths: Sequence[int],
+    *,
+    max_len: int | None = None,
+) -> torch.Tensor:
+    """Return a boolean [batch, max_len] mask where True marks real tokens/steps."""
+    if not lengths:
+        raise ValueError("lengths must not be empty")
+    if any(length <= 0 for length in lengths):
+        raise ValueError("lengths must be positive")
+    width = max_len if max_len is not None else max(lengths)
+    if width < max(lengths):
+        raise ValueError("max_len must be at least the largest length")
+    positions = torch.arange(width).unsqueeze(0)
+    return positions < torch.tensor(lengths, dtype=torch.long).unsqueeze(1)
+
+
 def encode_text_batch(
     texts: Sequence[object],
     *,
@@ -87,7 +104,11 @@ def _collate_language_modeling(batch: Sequence[Mapping[str, Any]]) -> dict[str, 
         seq_len = lengths[index]
         input_ids[index, :seq_len] = record["input_ids"]
         labels[index, :seq_len] = record["labels"]
-    return {"input_ids": input_ids, "labels": labels}
+    return {
+        "input_ids": input_ids,
+        "labels": labels,
+        "attention_mask": attention_mask_from_lengths(lengths, max_len=max_len),
+    }
 
 
 def _collate_text_supervision(
@@ -98,11 +119,15 @@ def _collate_text_supervision(
     tokenizer: TextTokenizer | None,
 ) -> dict[str, torch.Tensor]:
     label_dtype = torch.long if task == "classification" else torch.float32
+    sequences = [
+        encode_text(record["input"], vocab_size=vocab_size, tokenizer=tokenizer) for record in batch
+    ]
+    input_ids = pad_token_sequences(sequences)
     return {
-        "input_ids": encode_text_batch(
-            [record["input"] for record in batch],
-            vocab_size=vocab_size,
-            tokenizer=tokenizer,
+        "input_ids": input_ids,
+        "attention_mask": attention_mask_from_lengths(
+            [sequence.size(0) for sequence in sequences],
+            max_len=input_ids.size(1),
         ),
         "labels": torch.as_tensor(
             [_supervised_label(record, task=task) for record in batch],
@@ -150,7 +175,11 @@ def _collate_numeric_features(
             dtype=torch.float32,
         )
         inputs[index, : tensor.size(0)] = tensor
-    return {"input": inputs, "labels": labels}
+    return {
+        "input": inputs,
+        "attention_mask": attention_mask_from_lengths(seq_lens, max_len=max_len),
+        "labels": labels,
+    }
 
 
 def _supervised_label(record: Mapping[str, Any], *, task: str) -> Any:

@@ -38,6 +38,7 @@ def make_cfg(
         max_epochs=2,
         gradient_clip_val=1.0,
         accumulate_grad_batches=1,
+        pooling="masked_mean",
     )
 
 
@@ -100,6 +101,48 @@ def test_training_step_classification_uses_real_model():
     loss = module.training_step(batch, 0)
     assert isinstance(loss, torch.Tensor)
     assert loss.requires_grad
+
+
+def test_supervised_forward_uses_masked_mean_pooling():
+    module = MiniFormerModule(make_cfg("classification", "none"))
+    module.eval()
+    compact = {
+        "input_ids": torch.tensor([[3, 4]], dtype=torch.long),
+        "attention_mask": torch.tensor([[True, True]]),
+        "labels": torch.tensor([1]),
+    }
+    padded = {
+        "input_ids": torch.tensor([[3, 4, 0, 0]], dtype=torch.long),
+        "attention_mask": torch.tensor([[True, True, False, False]]),
+        "labels": torch.tensor([1]),
+    }
+
+    with torch.no_grad():
+        compact_logits, _ = module.forward_batch(compact)
+        padded_logits, _ = module.forward_batch(padded)
+
+    assert torch.allclose(compact_logits, padded_logits, atol=1e-6)
+
+
+def test_supervised_pooling_mode_can_use_first_token():
+    cfg = make_cfg("classification", "none")
+    cfg.pooling = "first"
+    module = MiniFormerModule(cfg)
+    module.eval()
+    batch = {
+        "input_ids": torch.tensor([[3, 4, 0]], dtype=torch.long),
+        "attention_mask": torch.tensor([[True, True, False]]),
+        "labels": torch.tensor([1]),
+    }
+
+    with torch.no_grad():
+        pooled, _ = module.forward_batch(batch)
+        sequence = module.model(
+            batch["input_ids"],
+            mask=batch["attention_mask"].unsqueeze(1).unsqueeze(2),
+        ).output
+
+    assert torch.allclose(pooled, sequence[:, 0, :], atol=1e-6)
 
 
 def test_raw_records_are_rejected_by_training_module():

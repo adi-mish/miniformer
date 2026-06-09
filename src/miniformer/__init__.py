@@ -16,6 +16,7 @@ __all__ = [
     "capture_transformer_trace",
     "save_trace_html",
     "TextTokenizer",
+    "attention_mask_from_lengths",
     "collate_records",
     "encode_text",
     "encode_text_batch",
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from miniformer.config.model_config import TransformerConfig
     from miniformer.data.preprocessing import (
         TextTokenizer,
+        attention_mask_from_lengths,
         collate_records,
         encode_text,
         encode_text_batch,
@@ -76,6 +78,7 @@ def __getattr__(name: str):
         return globals()[name]
     if name in {
         "TextTokenizer",
+        "attention_mask_from_lengths",
         "collate_records",
         "encode_text",
         "encode_text_batch",
@@ -83,6 +86,7 @@ def __getattr__(name: str):
     }:
         from miniformer.data.preprocessing import (
             TextTokenizer,
+            attention_mask_from_lengths,
             collate_records,
             encode_text,
             encode_text_batch,
@@ -90,6 +94,7 @@ def __getattr__(name: str):
         )
 
         globals()["TextTokenizer"] = TextTokenizer
+        globals()["attention_mask_from_lengths"] = attention_mask_from_lengths
         globals()["collate_records"] = collate_records
         globals()["encode_text"] = encode_text
         globals()["encode_text_batch"] = encode_text_batch

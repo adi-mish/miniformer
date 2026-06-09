@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, cast
 
 import torch
 import torch.nn as nn
@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
 from miniformer.model.transformer import Transformer
+from miniformer.train.pooling import PoolingMode, pool_sequence_outputs
 from miniformer.train.train_config import TrainConfig
 
 
@@ -48,7 +49,9 @@ class MiniFormerModule(nn.Module):
     def device(self) -> torch.device:
         return next(self.parameters()).device
 
-    def _preprocess_batch(self, batch: Any) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    def _preprocess_batch(
+        self, batch: Any
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
         """Move already-collated tensor batches to this module's device."""
         if not isinstance(batch, dict):
             raise TypeError(
@@ -69,15 +72,49 @@ class MiniFormerModule(nn.Module):
         labels = batch.get("labels")
         if labels is not None and not isinstance(labels, torch.Tensor):
             raise TypeError("MiniFormerModule expects batch['labels'] to be a tensor when present")
-        return inputs, labels.to(self.device) if labels is not None else None
+
+        attention_mask = batch.get("attention_mask")
+        if attention_mask is None and self.cfg.task != "language_modeling":
+            attention_mask = torch.ones(
+                inputs.size(0),
+                inputs.size(1),
+                dtype=torch.bool,
+                device=inputs.device,
+            )
+        elif attention_mask is not None:
+            if not isinstance(attention_mask, torch.Tensor):
+                raise TypeError("MiniFormerModule expects batch['attention_mask'] to be a tensor")
+            if attention_mask.shape != inputs.shape[:2]:
+                raise ValueError("attention_mask must match input batch and sequence dimensions")
+            attention_mask = attention_mask.to(self.device, dtype=torch.bool)
+
+        return inputs, labels.to(self.device) if labels is not None else None, attention_mask
+
+    @staticmethod
+    def _to_attention_mask(attention_mask: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+        if attention_mask is None:
+            return None
+        return attention_mask.unsqueeze(1).unsqueeze(2)
 
     def forward_batch(self, batch) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        x, y = self._preprocess_batch(batch)
+        x, y, attention_mask = self._preprocess_batch(batch)
         if self.cfg.task == "language_modeling":
             outputs = self.model(x, x, use_causal_mask=True).output
         else:
-            outputs = self.model(x).output
+            sequence_outputs = self.model(x, mask=self._to_attention_mask(attention_mask)).output
+            outputs = pool_sequence_outputs(
+                sequence_outputs,
+                attention_mask,
+                mode=self.pooling,
+            )
         return outputs, y
+
+    @property
+    def pooling(self) -> PoolingMode:
+        pooling = getattr(self.cfg, "pooling", "masked_mean")
+        if pooling not in {"first", "mean", "masked_mean"}:
+            raise ValueError(f"Unknown pooling mode: {pooling}")
+        return cast(PoolingMode, pooling)
 
     def configure_optimizers(self, steps_per_epoch: Optional[int] = None):
         optimizer = torch.optim.AdamW(
