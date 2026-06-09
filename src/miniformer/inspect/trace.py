@@ -302,7 +302,8 @@ def save_trace_html(
 <meta charset="utf-8">
 <title>Miniformer Trace</title>
 <style>
-body {{ font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 24px; color: #17202a; }}
+body {{ font-family: system-ui, -apple-system, Segoe UI, sans-serif; }}
+body {{ margin: 24px; color: #17202a; }}
 table {{ border-collapse: collapse; margin: 12px 0 24px; width: 100%; font-size: 13px; }}
 th, td {{ border: 1px solid #d7dde5; padding: 6px 8px; text-align: right; }}
 th:first-child, td:first-child {{ text-align: left; }}

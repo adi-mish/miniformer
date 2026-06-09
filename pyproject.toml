@@ -1,7 +1,7 @@
 [project]
 name = "miniformer"
 version = "0.1.0"
-description = "Production-grade, scaled-down Transformer implementation"
+description = "Compact PyTorch transformer implementation"
 authors = [
     {name = "adi-mish", email = "adimishra545@gmail.com"}
 ]

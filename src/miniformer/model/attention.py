@@ -1,11 +1,4 @@
-"""
-Multi‑head attention with optional
-• PyTorch‑2 scaled‑dot‑product attention (SDPA / FlashAttention backend)
-• Rotary positional embeddings (RoPE)
-• key‑value cache for fast autoregressive decoding
-
-Backwards‑compatible with the original forward signature.
-"""
+"""Multi-head attention with optional SDPA, RoPE, and explicit K/V caching."""
 
 from __future__ import annotations
 
@@ -21,7 +14,7 @@ from miniformer.model.masks import validate_attention_mask
 
 
 def _rotate_half(x: torch.Tensor) -> torch.Tensor:
-    """Utility used by RoPE – slice and rotate last dim (= head‑dim)."""
+    """Utility used by RoPE: slice and rotate the last dimension."""
     x1, x2 = x[..., ::2], x[..., 1::2]
     return torch.stack((-x2, x1), dim=-1).flatten(-2)
 
@@ -40,7 +33,7 @@ class MultiHeadAttention(nn.Module):
         n_heads: int,
         dropout: float = 0.1,
         use_sdpa: bool = False,  # SDPA requires PyTorch 2.0+
-        rotary_pct: float = 0.0,  # 0 = disabled, 1 = apply to full head‑dim
+        rotary_pct: float = 0.0,  # 0 = disabled, 1 = apply to full head dimension
     ):
         super().__init__()
         assert d_model % n_heads == 0, "d_model must be divisible by n_heads"
@@ -60,7 +53,7 @@ class MultiHeadAttention(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-        # pre‑compute sin / cos cache for RoPE – small for “mini” models
+        # Precompute sin/cos cache entries lazily by sequence length, device, and dtype.
         if self.rotary_dim > 0:
             inv_freq = 1.0 / (
                 10000

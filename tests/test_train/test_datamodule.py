@@ -139,3 +139,11 @@ def test_datamodule_numeric_features_collate_dtype(tmp_path):
     assert batch["input"].shape == (2, 2, 2)
     assert batch["input"].dtype == torch.float32
     assert batch["labels"].dtype == torch.long
+
+
+def test_datamodule_rejects_unknown_collation_task():
+    cfg = SimpleNamespace(task="unsupported")
+    dm = MiniFormerDataModule(cfg, tokenizer=None)
+
+    with pytest.raises(ValueError, match="Unsupported task"):
+        dm._collate_fn([{"input": "x", "labels": 0}])

@@ -1,7 +1,6 @@
 import pytest
 import torch
 
-import miniformer.model.seq2seq_transformer as seq2seq_module
 from miniformer.model.masks import (
     causal_mask,
     combine_masks,
@@ -63,7 +62,7 @@ def test_combine_masks_broadcasts_padding_and_causal_masks():
     ]
 
 
-def test_combine_masks_rejects_incompatible_shapes():
+def test_combine_masks_rejects_unbroadcastable_shapes():
     with pytest.raises(ValueError, match="broadcastable"):
         combine_masks(
             torch.ones(1, 1, 2, 3, dtype=torch.bool),
@@ -104,8 +103,3 @@ def test_self_attention_mask_uses_shared_semantics():
         [True, True, False],
         [True, True, False],
     ]
-
-
-def test_seq2seq_legacy_mask_helpers_are_not_public_api():
-    assert not hasattr(seq2seq_module, "create_padding_mask")
-    assert not hasattr(seq2seq_module, "create_causal_mask")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -126,7 +126,7 @@ class Encoder(nn.Module):
         # weight init identical to decoder
         self.apply(self._init_weights)
 
-        self.attn_weights: Optional[List[torch.Tensor]] = None
+        self.attn_weights: Optional[AttentionList] = None
 
     # ------------------------------------------------------------------ utils
     def _init_weights(self, module):
@@ -173,7 +173,7 @@ class Encoder(nn.Module):
         x = self.dropout(x)
 
         # run blocks
-        self.attn_weights = []
+        attn_weights: AttentionList = []
         if past_key_values is None:
             past_key_values = [None for _ in range(len(self.layers))]
         new_past_key_values: EncoderPastKeyValues = []
@@ -185,12 +185,13 @@ class Encoder(nn.Module):
                 use_cache=use_cache,
             )
             x = layer_output.hidden_states
-            self.attn_weights.append(layer_output.self_attention)
+            attn_weights.append(layer_output.self_attention)
             if use_cache:
                 new_past_key_values.append(layer_output.key_values)
+        self.attn_weights = attn_weights
 
         return EncoderOutput(
             hidden_states=x,
-            self_attentions=self.attn_weights,
+            self_attentions=attn_weights,
             past_key_values=new_past_key_values if use_cache else None,
         )

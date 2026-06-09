@@ -82,8 +82,7 @@ class Transformer(nn.Module):
                 if "input_ids" in x[0]:
                     x = torch.stack([item["input_ids"] for item in x])
                 elif "input" in x[0]:
-                    # Simple hack to handle text inputs - in real implementation
-                    # we would use a tokenizer here
+                    # Deterministic lightweight token IDs for inference without a tokenizer.
                     vocab_size = self.config.vocab_size
                     texts = [item["input"] for item in x]
                     max_len = max(len(str(t).split()) for t in texts)

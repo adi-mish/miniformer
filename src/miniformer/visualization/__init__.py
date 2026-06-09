@@ -1,6 +1,6 @@
 """Visualization helpers."""
 
-from miniformer.visualization.inspector import (
+from miniformer.inspect import (
     AttentionTrace,
     CacheTrace,
     LayerTrace,

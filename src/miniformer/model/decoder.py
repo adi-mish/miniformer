@@ -192,7 +192,7 @@ class Decoder(nn.Module):
         """Initialize weights following transformer conventions"""
         init_transformer_module(module, self.config.initializer_range)
 
-    def _create_causal_mask(
+    def _causal_self_attention_mask(
         self,
         seq_len: int,
         device: torch.device,
@@ -249,7 +249,7 @@ class Decoder(nn.Module):
         x = self.dropout(x)
 
         if use_causal_mask and self_attn_mask is None:
-            self_attn_mask = self._create_causal_mask(seq_len, device, past_len)
+            self_attn_mask = self._causal_self_attention_mask(seq_len, device, past_len)
 
         self_attentions: AttentionList = []
         cross_attentions: AttentionList = []

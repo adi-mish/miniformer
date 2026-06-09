@@ -48,8 +48,8 @@ def test_feature_input_shapes_fuzz(batch, seq, features):
     n_heads=st.sampled_from([2, 4, 8, 16]),
 )
 @settings(max_examples=15, deadline=5000)
-def test_attention_dimension_compatibility_fuzz(d_model, n_heads):
-    """Property-based test for attention dimension compatibility."""
+def test_attention_dimension_validation_fuzz(d_model, n_heads):
+    """Property-based test for valid attention dimensions."""
     # Only test valid combinations
     if d_model % n_heads != 0:
         pytest.skip("Invalid d_model/n_heads combination")

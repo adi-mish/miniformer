@@ -23,7 +23,7 @@ def make_cfg():
     return cfg
 
 
-def test_lr_scheduler_compatibility():
+def test_lr_scheduler_config_options():
     expected = {
         "linear": torch.optim.lr_scheduler.LinearLR,
         "onecycle": torch.optim.lr_scheduler.OneCycleLR,
@@ -41,7 +41,7 @@ def test_lr_scheduler_compatibility():
             assert isinstance(scheduler, expected[scheduler_name])
 
 
-def test_gradient_clipping_compatibility():
+def test_gradient_clipping_config_options():
     for clip_val in [0.1, 0.5, 1.0]:
         cfg = make_cfg()
         model = MiniFormerModule(cfg)

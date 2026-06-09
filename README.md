@@ -4,7 +4,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-%23EE4C2C.svg?&logo=PyTorch&logoColor=white)](https://pytorch.org/)
 
-Miniformer is a compact transformer implementation that I built to understand and experiment with the attention mechanism without the complexity of larger frameworks. Unlike heavyweight libraries that can be intimidating to modify, this codebase prioritizes readability and hackability—you can actually follow what's happening in each layer.
+Miniformer is a compact transformer implementation that I built to understand and experiment with the attention mechanism without the complexity of larger frameworks. Unlike heavyweight libraries that can be intimidating to modify, this codebase prioritizes readability and direct editing; you can actually follow what's happening in each layer.
 
 The library started as a learning exercise but evolved into something useful for prototyping. If you want to quickly test transformer variants or understand how attention really works under the hood, this might save you some headaches.
 
@@ -369,7 +369,7 @@ config = TransformerConfig(
     d_ff=3072,               # Feed-forward dimension (typically 4x d_model)
     dropout=0.1,             # Dropout rate
     activation="swiglu",     # "gelu", "relu", or "swiglu"
-    output_mode="projection",# "hidden", "vocab", or "projection"
+    output_mode="projection", # "hidden", "vocab", or "projection"
     max_seq_len=2048,        # Maximum sequence length
     output_dim=10,           # Required for classification/regression heads
     causal=False             # Set True for autoregressive token modeling
@@ -498,7 +498,7 @@ uv run pytest tests/ -k "attention"  # Only attention-related tests
 The tests cover:
 - **Model architecture**: Shape correctness, initialization, forward passes
 - **Training behavior**: Loss computation, gradient flow, metric tracking
-- **Persistence**: Save/load functionality, checkpoint compatibility
+- **Persistence**: Model save/load and trainer checkpoint restore behavior
 - **Integration**: Full training loops for each task type
 - **Edge cases**: Empty batches, extreme values, device transfers
 
@@ -513,7 +513,7 @@ The library currently handles:
 - Multi-head attention with RoPE support
 - SwiGLU and other gated activations
 - Plain PyTorch training pipeline
-- Decoder KV-cache for seq2seq generation
+- Encoder and decoder KV-cache paths for causal generation
 - Forward-pass visualization traces and attention plots
 - Classification, regression, and language modeling tasks
 - Proper initialization and numerical stability
@@ -522,20 +522,17 @@ The library currently handles:
 
 Some things I haven't gotten to yet:
 - **FlashAttention-specific integration**: PyTorch SDPA is available, but direct FlashAttention 2 APIs are not wired in
-- **Beam search**: Seq2seq generation uses sampling; beam search is not implemented
+- **Beam search**: Seq2seq generation supports greedy decoding and sampling, but beam search is not implemented
 - **Model parallelism**: The trainer uses one CPU or CUDA device
 - **Quantization**: No INT8/FP16 optimization path yet
 - **Advanced features**: No mixture of experts, sparse attention, or distributed training
 
-### What I'm Working On
+### Possible Future Work
 
-Near-term improvements (next few months):
 - **FlashAttention 2**: Direct integration beyond PyTorch SDPA
 - **Beam search decoding**: For better generation quality
 - **Gradient checkpointing**: Memory-efficient training for larger models
 - **Better examples**: More realistic use cases and tutorials
-
-Longer-term ideas:
 - **LoRA fine-tuning**: Parameter-efficient adaptation
 - **Model parallelism**: Multi-GPU training support  
 - **ONNX export**: For deployment to different runtimes

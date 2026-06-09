@@ -147,5 +147,4 @@ class MiniFormerDataModule:
                 x[i, : seq.size(0)] = seq
             return {"input": x, "labels": y}
 
-        # ---------------------------------------------------------- fallback (safety-net)
-        return batch
+        raise ValueError(f"Unsupported task for collation: {task}")
