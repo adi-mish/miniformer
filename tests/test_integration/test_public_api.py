@@ -54,3 +54,5 @@ def test_top_level_exports_models_and_trace_helpers(tmp_path):
     assert trace.output_shape == (1, 3, 32)
     assert "Miniformer Trace" in html_path.read_text()
     assert next_token.tolist() == [[1]]
+    assert miniformer.CONFIG_SCHEMA_VERSION == model.config.schema_version
+    assert miniformer.migrate_config_dict({"d_model": 8, "n_heads": 2})["output_mode"] == "hidden"

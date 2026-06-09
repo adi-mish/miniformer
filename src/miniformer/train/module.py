@@ -47,10 +47,11 @@ class MiniFormerModule(nn.Module):
             model_config["causal"] = False
         self.cfg.model_config = model_config
 
+        transformer_config = TransformerConfig.from_dict(model_config)
         if cfg.task == "language_modeling":
-            self.model = Seq2SeqTransformer(TransformerConfig(**model_config))
+            self.model = Seq2SeqTransformer(transformer_config)
         else:
-            self.model = Transformer(TransformerConfig(**model_config))
+            self.model = Transformer(transformer_config)
 
     @property
     def device(self) -> torch.device:

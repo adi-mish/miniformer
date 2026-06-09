@@ -1,12 +1,44 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Dict, Literal, Optional, Union
+from typing import Any, Dict, Literal, Mapping, Optional, Union
+
+CONFIG_SCHEMA_VERSION = 1
+
+
+def migrate_config_dict(config_dict: Mapping[str, Any]) -> Dict[str, Any]:
+    """Migrate a serialized TransformerConfig dictionary to the current schema."""
+    if not isinstance(config_dict, Mapping):
+        raise TypeError("config_dict must be a mapping")
+
+    migrated = dict(config_dict)
+    schema_version = migrated.get("schema_version")
+    if schema_version is None:
+        migrated["schema_version"] = CONFIG_SCHEMA_VERSION
+        if "output_mode" not in migrated:
+            migrated["output_mode"] = (
+                "projection" if migrated.get("output_dim") is not None else "hidden"
+            )
+        if "position_mode" not in migrated:
+            migrated["position_mode"] = (
+                "rope" if float(migrated.get("rotary_pct", 0.0) or 0.0) > 0 else "learned"
+            )
+        return migrated
+
+    if schema_version != CONFIG_SCHEMA_VERSION:
+        raise ValueError(
+            f"Unsupported TransformerConfig schema_version={schema_version}; "
+            f"expected {CONFIG_SCHEMA_VERSION}"
+        )
+    return migrated
 
 
 @dataclass
 class TransformerConfig:
     """Configuration class for Transformer models"""
+
+    # Serialization schema
+    schema_version: int = CONFIG_SCHEMA_VERSION
 
     # Model architecture
     vocab_size: int = 10000
@@ -44,6 +76,11 @@ class TransformerConfig:
 
     def __post_init__(self):
         """Validate configuration and set defaults"""
+        if self.schema_version != CONFIG_SCHEMA_VERSION:
+            raise ValueError(
+                f"Unsupported TransformerConfig schema_version={self.schema_version}; "
+                f"expected {CONFIG_SCHEMA_VERSION}"
+            )
         if self.d_model <= 0:
             raise ValueError("d_model must be positive")
         if self.n_heads <= 0:
@@ -90,16 +127,37 @@ class TransformerConfig:
             raise ValueError(f"position_mode='{self.position_mode}' requires rotary_pct > 0")
 
     @classmethod
-    def from_dict(cls, config_dict: Dict) -> "TransformerConfig":
-        """Create a configuration from a dictionary"""
-        return cls(**config_dict)
+    def field_names(cls) -> set[str]:
+        return {field.name for field in fields(cls)}
 
     @classmethod
-    def from_json(cls, file_path: Union[str, Path]) -> "TransformerConfig":
+    def from_dict(
+        cls,
+        config_dict: Mapping[str, Any],
+        *,
+        allow_unknown: bool = False,
+    ) -> "TransformerConfig":
+        """Create a configuration from a dictionary"""
+        migrated = migrate_config_dict(config_dict)
+        unknown_keys = set(migrated) - cls.field_names()
+        if unknown_keys:
+            unknown = ", ".join(sorted(unknown_keys))
+            if not allow_unknown:
+                raise ValueError(f"Unknown TransformerConfig fields: {unknown}")
+            migrated = {key: value for key, value in migrated.items() if key in cls.field_names()}
+        return cls(**migrated)
+
+    @classmethod
+    def from_json(
+        cls,
+        file_path: Union[str, Path],
+        *,
+        allow_unknown: bool = False,
+    ) -> "TransformerConfig":
         """Load configuration from a JSON file"""
         with open(file_path, "r") as f:
             config_dict = json.load(f)
-        return cls.from_dict(config_dict)
+        return cls.from_dict(config_dict, allow_unknown=allow_unknown)
 
     def to_dict(self) -> Dict:
         """Convert configuration to a dictionary"""

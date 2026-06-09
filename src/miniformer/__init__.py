@@ -12,6 +12,8 @@ __all__ = [
     "TransformerModelOutput",
     "Seq2SeqModelOutput",
     "TransformerConfig",
+    "CONFIG_SCHEMA_VERSION",
+    "migrate_config_dict",
     "TransformerTrace",
     "capture_transformer_trace",
     "save_trace_html",
@@ -35,7 +37,11 @@ __all__ = [
 __version__ = "0.1.0"
 
 if TYPE_CHECKING:
-    from miniformer.config.model_config import TransformerConfig
+    from miniformer.config.model_config import (
+        CONFIG_SCHEMA_VERSION,
+        TransformerConfig,
+        migrate_config_dict,
+    )
     from miniformer.data.batch import Batch, BatchKind
     from miniformer.data.preprocessing import (
         attention_mask_from_lengths,
@@ -68,6 +74,12 @@ def __getattr__(name: str):
 
         globals()[name] = TransformerConfig
         return TransformerConfig
+    if name in {"CONFIG_SCHEMA_VERSION", "migrate_config_dict"}:
+        from miniformer.config.model_config import CONFIG_SCHEMA_VERSION, migrate_config_dict
+
+        globals()["CONFIG_SCHEMA_VERSION"] = CONFIG_SCHEMA_VERSION
+        globals()["migrate_config_dict"] = migrate_config_dict
+        return globals()[name]
     if name == "Transformer":
         from miniformer.model.transformer import Transformer
 

@@ -73,13 +73,10 @@ def test_config_serialization():
         with open(config_path, "w") as f:
             json.dump(config_dict, f)
 
-        # Load config
-        with open(config_path, "r") as f:
-            loaded_dict = json.load(f)
-
-        loaded_config = TransformerConfig(**loaded_dict)
+        loaded_config = TransformerConfig.from_json(config_path)
 
         # All attributes should match
+        assert loaded_config.schema_version == config.schema_version
         assert loaded_config.vocab_size == config.vocab_size
         assert loaded_config.d_model == config.d_model
         assert loaded_config.n_heads == config.n_heads
