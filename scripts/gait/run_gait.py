@@ -99,12 +99,12 @@ def main():
     )
     parser.add_argument(
         "--data_dir", type=str,
-        default="/home/nonu_mishra/miniformer/data/miniformer/gait",
+        default="data/miniformer/gait",
         help="Path to gait data directory (containing gait_all.jsonl or a jsonl/ subfolder)"
     )
     parser.add_argument(
         "--config", dest="config_path", type=str,
-        default="/home/nonu_mishra/miniformer/configs/gait/gait_cfg.json",
+        default="configs/gait/gait_cfg.json",
         help="Path to base configuration JSON file"
     )
     parser.add_argument(

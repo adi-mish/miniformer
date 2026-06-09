@@ -14,13 +14,13 @@ def main():
     parser.add_argument(
         "--input", "-i",
         type=str,
-        default="/home/nonu_mishra/miniformer/data/miniformer/gait/raw/gait.csv",
+        default="data/miniformer/gait/raw/gait.csv",
         help="Path to input gait CSV file."
     )
     parser.add_argument(
         "--output", "-o",
         type=str,
-        default="/home/nonu_mishra/miniformer/data/miniformer/gait/jsonl/gait_all.jsonl",
+        default="data/miniformer/gait/jsonl/gait_all.jsonl",
         help="Path to output JSONL file."
     )
     parser.add_argument(

@@ -1,2 +1,0 @@
-/home/nonu_mishra/miniformer/data/miniformer/gait/jsonl/gait_all.jsonl filter=lfs diff=lfs merge=lfs -text
-data/miniformer/gait/jsonl/gait_all.jsonl filter=lfs diff=lfs merge=lfs -text
