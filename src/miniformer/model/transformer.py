@@ -143,6 +143,10 @@ class Transformer(nn.Module):
         mask: Optional[torch.Tensor] = None,
         *,
         top_k: int = 5,
+        include_raw_attention: bool = False,
+        include_logits: bool = True,
+        max_report_tokens: int = 64,
+        max_report_heads: int = 8,
         compare_cache: bool = False,
         **kwargs,
     ) -> TransformerTrace:
@@ -154,6 +158,10 @@ class Transformer(nn.Module):
             x,
             mask=mask,
             top_k=top_k,
+            include_raw_attention=include_raw_attention,
+            include_logits=include_logits,
+            max_report_tokens=max_report_tokens,
+            max_report_heads=max_report_heads,
             compare_cache=compare_cache,
             **kwargs,
         )

@@ -1,6 +1,8 @@
 """Visualization helpers."""
 
 from miniformer.inspect import (
+    DEFAULT_MAX_REPORT_HEADS,
+    DEFAULT_MAX_REPORT_TOKENS,
     AttentionTrace,
     CacheTrace,
     LayerTrace,
@@ -16,6 +18,8 @@ from miniformer.visualization.visualize import plot_attention, visualize_embeddi
 __all__ = [
     "AttentionTrace",
     "CacheTrace",
+    "DEFAULT_MAX_REPORT_HEADS",
+    "DEFAULT_MAX_REPORT_TOKENS",
     "LayerTrace",
     "LogitTrace",
     "TensorSummary",

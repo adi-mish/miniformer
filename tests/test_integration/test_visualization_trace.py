@@ -55,7 +55,8 @@ def test_capture_transformer_trace_encoder():
     assert all(attn.q_projection is not None for attn in trace.attentions)
     assert all(attn.k_projection is not None for attn in trace.attentions)
     assert all(attn.v_projection is not None for attn in trace.attentions)
-    assert all(attn.weights is not None for attn in trace.attentions)
+    assert all(attn.weights is None for attn in trace.attentions)
+    assert all("include_raw_attention=True" in (attn.reason or "") for attn in trace.attentions)
     assert trace.logits is not None
     assert trace.logits.shape == (2, 5, 30)
     assert trace.logits.top_k == 3
@@ -67,6 +68,78 @@ def test_capture_transformer_trace_encoder():
     assert trace.cache.max_abs_diff < 1e-6
     assert model.training
     assert torch.allclose(expected, actual)
+
+
+def test_capture_transformer_trace_can_include_bounded_raw_attention():
+    model = Transformer(
+        TransformerConfig(
+            vocab_size=30,
+            d_model=16,
+            n_heads=2,
+            n_layers=1,
+            d_ff=32,
+            dropout=0.0,
+            output_mode="vocab",
+        )
+    )
+    input_ids = torch.randint(1, 30, (1, 4))
+
+    trace = capture_transformer_trace(
+        model,
+        input_ids,
+        include_raw_attention=True,
+        max_report_tokens=4,
+        max_report_heads=2,
+    )
+
+    assert trace.attentions[0].weights is not None
+    assert trace.attentions[0].reason is None
+    assert trace.metadata["include_raw_attention"] is True
+
+
+def test_capture_transformer_trace_omits_raw_attention_over_limits():
+    model = Transformer(
+        TransformerConfig(
+            vocab_size=30,
+            d_model=16,
+            n_heads=2,
+            n_layers=1,
+            d_ff=32,
+            dropout=0.0,
+            output_mode="vocab",
+        )
+    )
+    input_ids = torch.randint(1, 30, (1, 5))
+
+    trace = capture_transformer_trace(
+        model,
+        input_ids,
+        include_raw_attention=True,
+        max_report_tokens=4,
+    )
+
+    assert trace.attentions[0].weights is None
+    assert "max_report_tokens" in (trace.attentions[0].reason or "")
+
+
+def test_capture_transformer_trace_can_disable_logits():
+    model = Transformer(
+        TransformerConfig(
+            vocab_size=30,
+            d_model=16,
+            n_heads=2,
+            n_layers=1,
+            d_ff=32,
+            dropout=0.0,
+            output_mode="vocab",
+        )
+    )
+    input_ids = torch.randint(1, 30, (1, 4))
+
+    trace = capture_transformer_trace(model, input_ids, include_logits=False)
+
+    assert trace.logits is None
+    assert trace.metadata["include_logits"] is False
 
 
 def test_capture_transformer_trace_json_round_trip(tmp_path):
@@ -93,6 +166,7 @@ def test_capture_transformer_trace_json_round_trip(tmp_path):
     assert loaded["logits"]["top_token_ids"]
     assert loaded["layers"][0]["residual_by_token"]
     assert loaded["attentions"][0]["per_head_entropy"]
+    assert loaded["attentions"][0]["weights"] is None
     assert loaded["layers"][0]["input_norm"] > 0
     assert json.loads(trace.to_json())["attentions"][0]["available"]
 
@@ -103,6 +177,31 @@ def test_capture_transformer_trace_json_round_trip(tmp_path):
     assert "Residual Norms" in html
     assert "Q/K/V Projection Summaries" in html
     assert "Logit Evolution" in html
+    assert "raw attention weights not stored" in html
+
+
+def test_trace_html_report_limits_truncate_large_sections(tmp_path):
+    model = Transformer(
+        TransformerConfig(
+            vocab_size=30,
+            d_model=16,
+            n_heads=2,
+            n_layers=1,
+            d_ff=32,
+            dropout=0.0,
+            output_mode="vocab",
+        )
+    )
+    input_ids = torch.randint(1, 30, (1, 6))
+    trace = capture_transformer_trace(model, input_ids, include_raw_attention=True)
+    path = tmp_path / "limited.html"
+
+    trace.to_html(path, tokens=[str(i) for i in range(6)], max_tokens=3, max_heads=1)
+
+    html = path.read_text()
+    assert "Heatmap truncated" in html
+    assert "Logit table truncated" in html
+    assert "report head limit" in html
 
 
 def test_capture_transformer_trace_seq2seq_and_plot():

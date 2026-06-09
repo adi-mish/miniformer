@@ -1,6 +1,8 @@
 """Structured model inspection APIs."""
 
 from miniformer.inspect.trace import (
+    DEFAULT_MAX_REPORT_HEADS,
+    DEFAULT_MAX_REPORT_TOKENS,
     AttentionTrace,
     CacheTrace,
     LayerTrace,
@@ -15,6 +17,8 @@ from miniformer.inspect.trace import (
 __all__ = [
     "AttentionTrace",
     "CacheTrace",
+    "DEFAULT_MAX_REPORT_HEADS",
+    "DEFAULT_MAX_REPORT_TOKENS",
     "LayerTrace",
     "LogitTrace",
     "TensorSummary",

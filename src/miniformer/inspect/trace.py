@@ -11,6 +11,9 @@ import torch.nn.functional as F
 
 from miniformer.model.masks import padding_mask
 
+DEFAULT_MAX_REPORT_TOKENS = 64
+DEFAULT_MAX_REPORT_HEADS = 8
+
 
 @dataclass(frozen=True)
 class TensorSummary:
@@ -120,9 +123,16 @@ class TransformerTrace:
         """Write the trace to a JSON file."""
         Path(path).write_text(self.to_json(indent=indent))
 
-    def to_html(self, path: str | Path, tokens: Optional[Sequence[str]] = None) -> None:
+    def to_html(
+        self,
+        path: str | Path,
+        tokens: Optional[Sequence[str]] = None,
+        *,
+        max_tokens: int = DEFAULT_MAX_REPORT_TOKENS,
+        max_heads: int = DEFAULT_MAX_REPORT_HEADS,
+    ) -> None:
         """Write a self-contained HTML report for this trace."""
-        save_trace_html(self, path, tokens=tokens)
+        save_trace_html(self, path, tokens=tokens, max_tokens=max_tokens, max_heads=max_heads)
 
 
 def _fmt(value: Optional[float]) -> str:
@@ -135,23 +145,52 @@ def _shape_text(shape: Sequence[int]) -> str:
     return "x".join(str(item) for item in shape) if shape else ""
 
 
+def _validate_positive_int(name: str, value: int) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+
+
+def _matrix_shape(values: Sequence[Sequence[float]]) -> tuple[int, int]:
+    if not values:
+        return (0, 0)
+    return (len(values), max(len(row) for row in values))
+
+
 def _heatmap_table(
-    values: Sequence[Sequence[float]], *, tokens: Optional[Sequence[str]] = None
+    values: Sequence[Sequence[float]],
+    *,
+    tokens: Optional[Sequence[str]] = None,
+    max_rows: Optional[int] = None,
+    max_cols: Optional[int] = None,
 ) -> str:
     if not values:
         return "<p>No values.</p>"
-    flat = [float(item) for row in values for item in row]
+    row_count, col_count = _matrix_shape(values)
+    display_values = values
+    notice = ""
+    if max_rows is not None or max_cols is not None:
+        row_limit = max_rows if max_rows is not None else row_count
+        col_limit = max_cols if max_cols is not None else col_count
+        if row_count > row_limit or col_count > col_limit:
+            display_values = [row[:col_limit] for row in values[:row_limit]]
+            notice = (
+                "<p class='notice'>Heatmap truncated from "
+                f"{row_count}x{col_count} to {len(display_values)}x"
+                f"{_matrix_shape(display_values)[1]} by report limits.</p>"
+            )
+
+    flat = [float(item) for row in display_values for item in row]
     minimum = min(flat)
     maximum = max(flat)
     span = max(maximum - minimum, 1e-12)
     header = "<tr><th></th>"
-    width = max(len(row) for row in values)
+    width = max(len(row) for row in display_values)
     for col in range(width):
         label = tokens[col] if tokens is not None and col < len(tokens) else str(col)
         header += f"<th>{html.escape(label)}</th>"
     header += "</tr>"
     rows = [header]
-    for row_index, row in enumerate(values):
+    for row_index, row in enumerate(display_values):
         label = f"b{row_index}"
         cells = [f"<th>{html.escape(label)}</th>"]
         for value in row:
@@ -163,7 +202,7 @@ def _heatmap_table(
                 f"{html.escape(_fmt(float(value)))}</td>"
             )
         rows.append("<tr>" + "".join(cells) + "</tr>")
-    return "<table class='heatmap'>" + "".join(rows) + "</table>"
+    return notice + "<table class='heatmap'>" + "".join(rows) + "</table>"
 
 
 def _summary_row(label: str, summary: Optional[TensorSummary]) -> str:
@@ -190,7 +229,13 @@ def _summary_table(title: str, rows: Sequence[tuple[str, Optional[TensorSummary]
     )
 
 
-def _attention_section(attention: AttentionTrace, tokens: Optional[Sequence[str]]) -> str:
+def _attention_section(
+    attention: AttentionTrace,
+    tokens: Optional[Sequence[str]],
+    *,
+    max_tokens: int,
+    max_heads: int,
+) -> str:
     parts = [
         f"<section><h3>{html.escape(attention.name)}</h3>",
         "<p>"
@@ -213,20 +258,54 @@ def _attention_section(attention: AttentionTrace, tokens: Optional[Sequence[str]
     if not attention.available:
         parts.append(f"<p class='notice'>{html.escape(attention.reason or 'Unavailable')}</p>")
     elif attention.weights is not None:
-        for head_index, head_weights in enumerate(attention.weights):
-            parts.append(f"<h4>Raw Attention Heatmap Head {head_index}</h4>")
-            parts.append(_heatmap_table(head_weights, tokens=tokens))
+        head_count = len(attention.weights)
+        if head_count > max_heads:
+            parts.append(
+                "<p class='notice'>Raw attention heatmaps omitted by report head limit "
+                f"({head_count} heads > {max_heads}).</p>"
+            )
+        else:
+            for head_index, head_weights in enumerate(attention.weights):
+                row_count, col_count = _matrix_shape(head_weights)
+                if row_count > max_tokens or col_count > max_tokens:
+                    parts.append(
+                        "<p class='notice'>Raw attention heatmap omitted by report token limit "
+                        f"({row_count}x{col_count} > {max_tokens}).</p>"
+                    )
+                    continue
+                parts.append(f"<h4>Raw Attention Heatmap Head {head_index}</h4>")
+                parts.append(
+                    _heatmap_table(
+                        head_weights,
+                        tokens=tokens,
+                        max_rows=max_tokens,
+                        max_cols=max_tokens,
+                    )
+                )
+    elif attention.reason:
+        parts.append(f"<p class='notice'>{html.escape(attention.reason)}</p>")
+    else:
+        parts.append(
+            "<p class='notice'>Raw attention heatmaps were not stored. Capture with "
+            "include_raw_attention=True and use_sdpa=False to include them.</p>"
+        )
     parts.append("</section>")
     return "".join(parts)
 
 
-def _logit_section(logits: LogitTrace, tokens: Optional[Sequence[str]]) -> str:
+def _logit_section(
+    logits: LogitTrace,
+    tokens: Optional[Sequence[str]],
+    *,
+    max_tokens: int,
+) -> str:
     rows = []
     first_batch_ids = logits.token_ids[0] if logits.token_ids else []
     first_batch_values = logits.values[0] if logits.values else []
     first_batch_probs = logits.probabilities[0] if logits.probabilities else []
     first_batch_entropy = logits.entropy[0] if logits.entropy else []
-    for index, token_ids in enumerate(first_batch_ids):
+    truncated = len(first_batch_ids) > max_tokens
+    for index, token_ids in enumerate(first_batch_ids[:max_tokens]):
         label = tokens[index] if tokens is not None and index < len(tokens) else str(index)
         values = first_batch_values[index]
         probs = first_batch_probs[index]
@@ -241,9 +320,15 @@ def _logit_section(logits: LogitTrace, tokens: Optional[Sequence[str]]) -> str:
             f"<td>{html.escape(_fmt(entropy))}</td>"
             f"<td>{html.escape(top_items)}</td></tr>"
         )
+    notice = (
+        f"<p class='notice'>Logit table truncated to {max_tokens} positions.</p>"
+        if truncated
+        else ""
+    )
     return (
         "<section><h2>Logit Evolution</h2>"
-        "<table><tr><th>Token</th><th>Top token</th><th>Entropy</th><th>Top-k</th></tr>"
+        + notice
+        + "<table><tr><th>Token</th><th>Top token</th><th>Entropy</th><th>Top-k</th></tr>"
         + "".join(rows)
         + "</table></section>"
     )
@@ -253,8 +338,13 @@ def save_trace_html(
     trace: TransformerTrace,
     path: str | Path,
     tokens: Optional[Sequence[str]] = None,
+    *,
+    max_tokens: int = DEFAULT_MAX_REPORT_TOKENS,
+    max_heads: int = DEFAULT_MAX_REPORT_HEADS,
 ) -> None:
     """Write a self-contained static HTML report for a transformer trace."""
+    _validate_positive_int("max_tokens", max_tokens)
+    _validate_positive_int("max_heads", max_heads)
     cache = trace.cache
     cache_status = (
         f"attempted={cache.attempted}, supported={cache.supported}, "
@@ -278,7 +368,12 @@ def save_trace_html(
         if layer.residual_by_token is not None:
             residual_sections.append(
                 f"<h3>{html.escape(layer.name)} Residual Norms</h3>"
-                + _heatmap_table(layer.residual_by_token, tokens=tokens)
+                + _heatmap_table(
+                    layer.residual_by_token,
+                    tokens=tokens,
+                    max_rows=max_tokens,
+                    max_cols=max_tokens,
+                )
             )
         if layer.mlp_activation is not None or layer.mlp_output is not None:
             residual_sections.append(
@@ -292,9 +387,14 @@ def save_trace_html(
             )
 
     attention_sections = "".join(
-        _attention_section(attention, tokens) for attention in trace.attentions
+        _attention_section(attention, tokens, max_tokens=max_tokens, max_heads=max_heads)
+        for attention in trace.attentions
     )
-    logits_section = _logit_section(trace.logits, tokens) if trace.logits is not None else ""
+    logits_section = (
+        _logit_section(trace.logits, tokens, max_tokens=max_tokens)
+        if trace.logits is not None
+        else ""
+    )
     metadata = html.escape(json.dumps(trace.metadata, indent=2, default=str))
     document = f"""<!doctype html>
 <html lang="en">
@@ -379,6 +479,9 @@ def _attention_trace(
     q_projection: Optional[TensorSummary] = None,
     k_projection: Optional[TensorSummary] = None,
     v_projection: Optional[TensorSummary] = None,
+    include_raw_attention: bool,
+    max_report_tokens: int,
+    max_report_heads: int,
 ) -> AttentionTrace:
     if tensor is None:
         return AttentionTrace(
@@ -400,7 +503,27 @@ def _attention_trace(
     token_entropy = -(clamped * clamped.log()).sum(dim=-1)
     entropy = token_entropy.mean()
     per_head_entropy = token_entropy.mean(dim=(0, 2))
-    weights = values.mean(dim=0).cpu().tolist()
+    weights = None
+    reason: Optional[str] = (
+        "raw attention weights not stored; capture with include_raw_attention=True"
+    )
+    if include_raw_attention:
+        head_count = values.size(1)
+        query_tokens = values.size(-2)
+        key_tokens = values.size(-1)
+        if head_count > max_report_heads:
+            reason = (
+                "raw attention weights omitted because head count exceeds "
+                f"max_report_heads={max_report_heads}"
+            )
+        elif query_tokens > max_report_tokens or key_tokens > max_report_tokens:
+            reason = (
+                "raw attention weights omitted because token dimensions exceed "
+                f"max_report_tokens={max_report_tokens}"
+            )
+        else:
+            weights = values.mean(dim=0).cpu().tolist()
+            reason = None
     return AttentionTrace(
         name=name,
         shape=tuple(values.shape),
@@ -412,6 +535,7 @@ def _attention_trace(
         k_projection=k_projection,
         v_projection=v_projection,
         weights=weights,
+        reason=reason,
     )
 
 
@@ -735,6 +859,10 @@ def capture_transformer_trace(
     *model_args: Any,
     layer_name_fragments: Sequence[str] = (".layers.",),
     top_k: int = 5,
+    include_raw_attention: bool = False,
+    include_logits: bool = True,
+    max_report_tokens: int = DEFAULT_MAX_REPORT_TOKENS,
+    max_report_heads: int = DEFAULT_MAX_REPORT_HEADS,
     compare_cache: bool = False,
     cache_atol: float = 1e-5,
     cache_rtol: float = 1e-5,
@@ -747,6 +875,15 @@ def capture_transformer_trace(
     returning or re-raising an exception. The model's training/eval mode is
     restored afterward.
     """
+    if not isinstance(include_raw_attention, bool):
+        raise TypeError("include_raw_attention must be a boolean")
+    if not isinstance(include_logits, bool):
+        raise TypeError("include_logits must be a boolean")
+    if not isinstance(top_k, int) or isinstance(top_k, bool) or top_k < 0:
+        raise ValueError("top_k must be a non-negative integer")
+    _validate_positive_int("max_report_tokens", max_report_tokens)
+    _validate_positive_int("max_report_heads", max_report_heads)
+
     layer_states: MutableMapping[str, _LayerState] = {}
     layer_order: list[str] = []
     attentions: list[AttentionTrace] = []
@@ -810,6 +947,9 @@ def capture_transformer_trace(
                 q_projection=q_summary,
                 k_projection=k_summary,
                 v_projection=v_summary,
+                include_raw_attention=include_raw_attention,
+                max_report_tokens=max_report_tokens,
+                max_report_heads=max_report_heads,
             )
         )
 
@@ -899,7 +1039,11 @@ def capture_transformer_trace(
     finally:
         model.train(was_training)
 
-    logits = _logit_trace(output_tensor, top_k) if _is_logit_like(model, output_tensor) else None
+    logits = (
+        _logit_trace(output_tensor, top_k)
+        if include_logits and _is_logit_like(model, output_tensor)
+        else None
+    )
     return TransformerTrace(
         output_shape=tuple(output_tensor.shape),
         layers=_build_layer_traces(layer_order, layer_states),
@@ -909,6 +1053,10 @@ def capture_transformer_trace(
         metadata={
             "model_class": model.__class__.__name__,
             "training_restored_to": was_training,
+            "include_raw_attention": include_raw_attention,
+            "include_logits": include_logits,
+            "max_report_tokens": max_report_tokens,
+            "max_report_heads": max_report_heads,
         },
     )
 
