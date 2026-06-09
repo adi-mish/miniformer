@@ -257,6 +257,23 @@ def test_sample_next_token_rejects_nonfinite_logits():
         sample_next_token(logits, GenerationConfig())
 
 
+def test_sample_next_token_rejects_nan_logits():
+    logits = torch.tensor([[0.1, float("nan"), 0.4]])
+
+    with pytest.raises(ValueError, match="finite"):
+        sample_next_token(logits, GenerationConfig(do_sample=True))
+
+
+def test_sampling_extreme_finite_logits_stays_valid():
+    logits = torch.tensor([[1e20, -1e20, 0.0]])
+    config = GenerationConfig(do_sample=True, temperature=1.0)
+    generator = torch.Generator().manual_seed(0)
+
+    next_token = sample_next_token(logits, config, generator=generator)
+
+    assert next_token.tolist() == [[0]]
+
+
 def test_filter_logits_for_sampling_applies_top_k():
     logits = torch.tensor([[0.0, 3.0, 2.0, -1.0]])
     config = GenerationConfig(do_sample=True, top_k=2)

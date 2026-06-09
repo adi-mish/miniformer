@@ -120,6 +120,38 @@ def test_manual_and_sdpa_attention_match_with_mask():
     assert torch.allclose(manual_out, sdpa_out, atol=1e-5)
 
 
+def test_manual_attention_gradcheck_small_tensors():
+    attention = MultiHeadAttention(d_model=4, n_heads=2, dropout=0.0, use_sdpa=False)
+    attention.double().eval()
+    q = torch.randn(1, 2, 4, dtype=torch.double, requires_grad=True)
+    k = torch.randn(1, 2, 4, dtype=torch.double, requires_grad=True)
+    v = torch.randn(1, 2, 4, dtype=torch.double, requires_grad=True)
+    mask = causal_mask(2)
+
+    def fn(q_tensor, k_tensor, v_tensor):
+        return attention(q_tensor, k_tensor, v_tensor, mask)[0]
+
+    assert torch.autograd.gradcheck(fn, (q, k, v), eps=1e-6, atol=1e-4, rtol=1e-3)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+@pytest.mark.parametrize("use_sdpa", [False, True])
+def test_attention_dtype_smoke_stays_finite(dtype, use_sdpa):
+    attention = MultiHeadAttention(d_model=16, n_heads=4, dropout=0.0, use_sdpa=use_sdpa)
+    attention.to(dtype=dtype).eval()
+    x = torch.randn(2, 3, 16, dtype=dtype)
+    mask = causal_mask(3)
+
+    with torch.no_grad():
+        out, weights, _ = attention(x, x, x, mask)
+
+    assert out.dtype == dtype
+    assert torch.isfinite(out.float()).all()
+    if weights is not None:
+        assert weights.dtype == dtype
+        assert torch.isfinite(weights.float()).all()
+
+
 @pytest.mark.parametrize("use_sdpa", [False, True])
 def test_attention_validates_masks_before_backend(use_sdpa):
     attention = MultiHeadAttention(d_model=16, n_heads=4, dropout=0.0, use_sdpa=use_sdpa)
@@ -142,7 +174,23 @@ def test_all_masked_manual_attention_returns_zero_context():
 
     bias = attention.wo.bias.view(1, 1, -1)
     assert torch.allclose(weights, torch.zeros_like(weights))
+    assert torch.isfinite(weights).all()
+    assert torch.isfinite(out).all()
     assert torch.allclose(out, bias.expand_as(out), atol=1e-6)
+
+
+def test_all_masked_manual_attention_with_extreme_values_stays_finite():
+    attention = MultiHeadAttention(d_model=16, n_heads=4, dropout=0.0, use_sdpa=False)
+    attention.eval()
+    x = torch.full((1, 2, 16), 1e20)
+    mask = torch.zeros(1, 1, 2, 2, dtype=torch.bool)
+
+    with torch.no_grad():
+        out, weights, _ = attention(x, x, x, mask)
+
+    assert torch.allclose(weights, torch.zeros_like(weights))
+    assert torch.isfinite(weights).all()
+    assert torch.isfinite(out).all()
 
 
 def test_sinusoidal_positional_encoding_supports_odd_model_dim():
