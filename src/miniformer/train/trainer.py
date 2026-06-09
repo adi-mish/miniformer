@@ -3,11 +3,14 @@ from __future__ import annotations
 import csv
 import random
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, Optional, cast
 
 import numpy as np
 import torch
 
+from miniformer.data.validation import TaskName, validate_jsonl
+
+from .artifacts import create_run_paths, write_run_manifest, write_train_config
 from .datamodule import MiniFormerDataModule
 from .module import MiniFormerModule
 from .train_config import TrainConfig
@@ -110,6 +113,11 @@ def train_model(
     seed_everything(cfg.seed, cfg.deterministic)
     device = torch.device("cuda" if torch.cuda.is_available() and cfg.gpus > 0 else "cpu")
 
+    run_paths = create_run_paths(cfg)
+    write_train_config(cfg, run_paths.config)
+    write_run_manifest(run_paths.manifest, cfg=cfg, status="started", device=device)
+    _validate_configured_datasets(cfg, tokenizer=tokenizer)
+
     datamodule = datamodule or MiniFormerDataModule(cfg, tokenizer)
     datamodule.setup()
     train_loader = datamodule.train_dataloader()
@@ -123,15 +131,14 @@ def train_model(
 
     optimizer, scheduler = module.configure_optimizers(steps_per_epoch=len(train_loader))
 
-    run_dir = Path(cfg.work_dir) / cfg.experiment_name
-    ckpt_dir = run_dir / "checkpoints"
-    log_path = run_dir / "metrics.csv"
-
     best_value: Optional[float] = None
     best_metrics: Dict[str, float] = {}
     epochs_without_improvement = 0
+    final_epoch = -1
+    metrics: Dict[str, float] = {}
 
     for epoch in range(cfg.max_epochs):
+        final_epoch = epoch
         train_loss = train_one_epoch(
             module,
             train_loader,
@@ -141,12 +148,11 @@ def train_model(
             accumulate_grad_batches=cfg.accumulate_grad_batches,
         )
 
-        metrics: Dict[str, float] = {"epoch": float(epoch), "train_loss": train_loss}
+        metrics = {"epoch": float(epoch), "train_loss": train_loss}
         if val_loader is not None:
             metrics.update(evaluate(module, val_loader))
 
-        if cfg.logger == "csv":
-            _write_csv_log(log_path, metrics)
+        _write_csv_log(run_paths.metrics, metrics)
 
         monitor_value = metrics.get(cfg.checkpoint_metric)
         if monitor_value is not None and _metric_is_better(
@@ -158,13 +164,19 @@ def train_model(
             best_metrics = metrics
             epochs_without_improvement = 0
             module.save_checkpoint(
-                ckpt_dir / "best.pt", optimizer=optimizer, epoch=epoch, metrics=metrics
+                run_paths.checkpoints / "best.pt",
+                optimizer=optimizer,
+                epoch=epoch,
+                metrics=metrics,
             )
         else:
             epochs_without_improvement += 1
 
         module.save_checkpoint(
-            ckpt_dir / "last.pt", optimizer=optimizer, epoch=epoch, metrics=metrics
+            run_paths.checkpoints / "last.pt",
+            optimizer=optimizer,
+            epoch=epoch,
+            metrics=metrics,
         )
 
         if (
@@ -178,7 +190,35 @@ def train_model(
         test_metrics = evaluate(module, datamodule.test_dataloader())
         best_metrics.update({f"test_{key}": value for key, value in test_metrics.items()})
 
+    write_run_manifest(
+        run_paths.manifest,
+        cfg=cfg,
+        status="completed",
+        device=device,
+        latest_metrics=metrics,
+        best_metrics=best_metrics or metrics,
+        epoch=final_epoch,
+    )
     return best_metrics or metrics
+
+
+def _validate_configured_datasets(cfg: TrainConfig, *, tokenizer=None) -> None:
+    task = cast(TaskName, cfg.task)
+    max_seq_len_value = cfg.model_config.get("max_seq_len")
+    max_seq_len = int(max_seq_len_value) if max_seq_len_value is not None else None
+    require_tokenizer = cfg.task == "language_modeling"
+
+    for path in [cfg.train_path, cfg.val_path, cfg.test_path]:
+        if not path:
+            continue
+        report = validate_jsonl(
+            path,
+            task=task,
+            tokenizer=tokenizer,
+            max_seq_len=max_seq_len,
+            require_tokenizer=require_tokenizer,
+        )
+        report.raise_for_errors()
 
 
 def main():

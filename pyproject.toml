@@ -21,6 +21,7 @@ dependencies = [
 miniformer-train = "miniformer.train.trainer:main"
 miniformer-check = "miniformer.scripts.run_checks:main"
 miniformer-make-jsonl = "miniformer.scripts.make_tiny_jsonl:main"
+miniformer-validate-jsonl = "miniformer.scripts.validate_jsonl:main"
 miniformer-trace-report = "miniformer.scripts.write_trace_report:main"
 
 [project.optional-dependencies]

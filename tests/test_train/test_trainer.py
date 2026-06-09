@@ -1,3 +1,6 @@
+import json
+
+import pytest
 import torch
 
 from miniformer.train.train_config import TrainConfig
@@ -109,3 +112,37 @@ def test_train_model_smoke(tmp_path):
     assert "val_loss" in metrics
     assert (tmp_path / "smoke" / "checkpoints" / "best.pt").exists()
     assert (tmp_path / "smoke" / "checkpoints" / "last.pt").exists()
+    assert (tmp_path / "smoke" / "config.json").exists()
+    assert (tmp_path / "smoke" / "metrics.csv").exists()
+    manifest = json.loads((tmp_path / "smoke" / "run_manifest.json").read_text())
+    assert manifest["status"] == "completed"
+    assert manifest["best_metrics"]["val_loss"] == metrics["val_loss"]
+
+
+def test_train_model_rejects_invalid_jsonl_before_training(tmp_path):
+    train_path = tmp_path / "train.jsonl"
+    train_path.write_text('{"input": "", "label": 0}\n')
+
+    cfg = TrainConfig(
+        task="classification",
+        model="encoder",
+        train_path=str(train_path),
+        batch_size=1,
+        num_workers=0,
+        max_epochs=1,
+        gpus=0,
+        model_config={
+            "vocab_size": 20,
+            "d_model": 8,
+            "n_heads": 2,
+            "n_layers": 1,
+            "d_ff": 16,
+            "output_mode": "projection",
+            "output_dim": 2,
+        },
+        work_dir=str(tmp_path),
+        experiment_name="invalid",
+    )
+
+    with pytest.raises(ValueError, match="validation"):
+        train_model(cfg)

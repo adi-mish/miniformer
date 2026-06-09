@@ -85,13 +85,41 @@ def test_check_script_lists_available_checks():
     assert "build: uv build" in result.stdout
 
 
+def test_validate_jsonl_script_reports_schema_errors(tmp_path):
+    path = tmp_path / "bad.jsonl"
+    path.write_text('{"input": "", "label": 0}\n')
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "miniformer.scripts.validate_jsonl",
+            str(path),
+            "--task",
+            "classification",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "errors=1" in result.stdout
+    assert "input string" in result.stdout
+
+
 def test_script_modules_import_without_side_effects():
     scripts_dir = Path(__file__).resolve().parents[2] / "src" / "miniformer" / "scripts"
     script_names = {
         script.stem for script in scripts_dir.glob("*.py") if script.name not in {"__init__.py"}
     }
 
-    assert script_names == {"make_tiny_jsonl", "run_checks", "write_trace_report"}
+    assert script_names == {
+        "make_tiny_jsonl",
+        "run_checks",
+        "validate_jsonl",
+        "write_trace_report",
+    }
     for script_name in script_names:
         module = importlib.import_module(f"miniformer.scripts.{script_name}")
         assert callable(module.main)
