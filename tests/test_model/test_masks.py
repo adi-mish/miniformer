@@ -1,6 +1,7 @@
 import pytest
 import torch
 
+from miniformer.config.model_config import TransformerConfig
 from miniformer.model.masks import (
     causal_mask,
     combine_masks,
@@ -8,6 +9,7 @@ from miniformer.model.masks import (
     self_attention_mask,
     validate_attention_mask,
 )
+from miniformer.model.transformer import Transformer
 
 
 def test_padding_mask_marks_token_padding_keys_only():
@@ -103,3 +105,47 @@ def test_self_attention_mask_uses_shared_semantics():
         [True, True, False],
         [True, True, False],
     ]
+
+
+def test_padding_mask_preserves_real_token_outputs():
+    model = Transformer(
+        TransformerConfig(
+            vocab_size=20,
+            d_model=8,
+            n_heads=2,
+            n_layers=1,
+            d_ff=16,
+            dropout=0.0,
+            causal=False,
+        )
+    ).eval()
+    compact = torch.tensor([[3, 4]], dtype=torch.long)
+    padded = torch.tensor([[3, 4, 0, 0]], dtype=torch.long)
+
+    with torch.no_grad():
+        compact_out = model(compact).output
+        padded_out = model(padded).output[:, :2]
+
+    assert torch.allclose(compact_out, padded_out, atol=1e-6)
+
+
+def test_custom_mask_matches_padding_mask_for_padded_tokens():
+    model = Transformer(
+        TransformerConfig(
+            vocab_size=20,
+            d_model=8,
+            n_heads=2,
+            n_layers=1,
+            d_ff=16,
+            dropout=0.0,
+            causal=False,
+        )
+    ).eval()
+    padded = torch.tensor([[3, 4, 0, 0]], dtype=torch.long)
+    custom_mask = torch.tensor([[True, True, False, False]]).unsqueeze(1).unsqueeze(2)
+
+    with torch.no_grad():
+        automatic = model(padded).output
+        custom = model(padded, mask=custom_mask).output
+
+    assert torch.allclose(automatic, custom, atol=1e-6)

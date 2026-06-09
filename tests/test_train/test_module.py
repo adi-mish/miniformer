@@ -124,6 +124,38 @@ def test_supervised_forward_uses_masked_mean_pooling():
     assert torch.allclose(compact_logits, padded_logits, atol=1e-6)
 
 
+def test_feature_input_padding_does_not_affect_masked_mean_pooling():
+    cfg = make_cfg("regression", "none")
+    cfg.model_config = {
+        "input_dim": 2,
+        "d_model": 8,
+        "n_heads": 2,
+        "n_layers": 1,
+        "d_ff": 16,
+        "dropout": 0.0,
+        "output_mode": "projection",
+        "output_dim": 1,
+    }
+    module = MiniFormerModule(cfg)
+    module.eval()
+    compact = {
+        "input": torch.tensor([[[1.0, 2.0], [3.0, 4.0]]]),
+        "attention_mask": torch.tensor([[True, True]]),
+        "labels": torch.tensor([1.0]),
+    }
+    padded = {
+        "input": torch.tensor([[[1.0, 2.0], [3.0, 4.0], [999.0, 999.0]]]),
+        "attention_mask": torch.tensor([[True, True, False]]),
+        "labels": torch.tensor([1.0]),
+    }
+
+    with torch.no_grad():
+        compact_preds, _ = module.forward_batch(compact)
+        padded_preds, _ = module.forward_batch(padded)
+
+    assert torch.allclose(compact_preds, padded_preds, atol=1e-6)
+
+
 def test_supervised_pooling_mode_can_use_first_token():
     cfg = make_cfg("classification", "none")
     cfg.pooling = "first"
