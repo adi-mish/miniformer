@@ -47,7 +47,8 @@ def visualize_embeddings(model, vocab, method='pca'):
     import sklearn.manifold as manifold
     
     # Get embeddings from model
-    embeddings = model.encoder.token_embedding.embedding.weight.cpu().detach().numpy()
+    token_embedding = model.encoder.token_embedding
+    embeddings = token_embedding.weight.cpu().detach().numpy()
     
     # Apply dimensionality reduction
     if method == 'pca':

@@ -218,7 +218,7 @@ class Transformer(nn.Module):
 
     def get_attention_weights(self, x):
         """Get attention weights for visualization"""
-        mask = self._create_mask(x)
+        mask = self._build_mask(x)
         _ = self.forward(x, mask)
         # after __init__ is done, encoder is never None
         assert self.encoder is not None, "Transformer.encoder should already be initialized"

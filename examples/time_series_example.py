@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 
-from miniformer import Transformer, TransformerTrainer, TransformerConfig
+from miniformer import Transformer, TransformerConfig
 from miniformer.visualization import plot_attention
 
 
@@ -44,8 +44,8 @@ def main():
     torch.manual_seed(42)
     
     # Create dataset
-    train_dataset = TimeSeriesDataset(num_samples=800)
-    val_dataset = TimeSeriesDataset(num_samples=200)
+    train_dataset = TimeSeriesDataset(num_samples=128)
+    val_dataset = TimeSeriesDataset(num_samples=32)
     
     # Get dataset parameters
     sample_x, sample_y = train_dataset[0]
@@ -60,9 +60,9 @@ def main():
     # Create model configuration
     config = TransformerConfig(
         input_dim=input_dim,  # Use input_dim since we're working with features, not tokens
-        d_model=input_dim,    # Match d_model with input_dim for direct use
+        d_model=16,
         output_dim=output_dim,
-        n_heads=2,
+        n_heads=4,
         n_layers=2,
         d_ff=32,
         dropout=0.1,
@@ -74,22 +74,21 @@ def main():
     model = Transformer(config)
     print(model)
     
-    # Create trainer
-    trainer = TransformerTrainer(
-        model,
-        config=config,
-        task_type="regression"  # Important: set task type to regression
-    )
-    
-    # Train model
-    history = trainer.train(
-        train_dataset=train_dataset,
-        epochs=10,
-        validation_dataset=val_dataset,
-        eval_steps=50,
-        save_steps=100,
-        checkpoint_dir="./time_series_checkpoints"
-    )
+    train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
+    loss_fn = torch.nn.MSELoss()
+
+    model.train()
+    for epoch in range(2):
+        total_loss = 0.0
+        for x_batch, y_batch in train_loader:
+            optimizer.zero_grad()
+            y_pred = model(x_batch)
+            loss = loss_fn(y_pred, y_batch)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+        print(f"Epoch {epoch + 1}: loss={total_loss / len(train_loader):.4f}")
     
     # Visualize predictions
     model.eval()
