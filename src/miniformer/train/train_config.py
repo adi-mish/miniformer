@@ -17,6 +17,7 @@ class TrainConfig:
     test_path: str = ""
     batch_size: int = 32
     num_workers: int = 4
+    shuffle_train: bool = True
 
     # --- optimisation -------------------------------------------------------
     lr: float = 5e-4

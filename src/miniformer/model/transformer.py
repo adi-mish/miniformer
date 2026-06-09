@@ -5,6 +5,7 @@ from typing import Optional, List, Dict, Any, Union
 
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.encoder import Encoder
+from miniformer.utils.tokenization import stable_token_id
 
 
 class Transformer(nn.Module):
@@ -168,7 +169,7 @@ class Transformer(nn.Module):
                     for i, t in enumerate(texts):
                         words = str(t).split()
                         for j, w in enumerate(words):
-                            x[i, j] = hash(w) % vocab_size
+                            x[i, j] = stable_token_id(w, vocab_size)
                 else:
                     raise TypeError("Input batch dict must contain 'input_ids' or 'input' keys")
             elif isinstance(x, dict) and "input_ids" in x:

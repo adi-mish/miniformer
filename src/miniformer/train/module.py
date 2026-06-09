@@ -8,6 +8,7 @@ import torchmetrics as tm
 import types, sys
 from lightning.pytorch.callbacks import ModelCheckpoint
 from typing import Dict, Any, Optional
+from miniformer.utils.tokenization import stable_token_id
 
 @dataclass
 class TrainConfig:
@@ -164,7 +165,7 @@ class MiniFormerLitModule(L.LightningModule):
             for i, t in enumerate(texts):
                 words = str(t).split()
                 ids = torch.tensor(
-                    [hash(w) % vocab_size for w in words],
+                    [stable_token_id(w, vocab_size) for w in words],
                     dtype=torch.long,
                     device=self.device
                 )
@@ -314,4 +315,3 @@ class MiniFormerLitModule(L.LightningModule):
         ckpt = torch.load(best_path, map_location=self.device, weights_only=False)
         state_dict = ckpt.get("state_dict", ckpt)
         self.load_state_dict(state_dict)
-

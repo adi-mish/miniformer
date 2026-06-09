@@ -58,7 +58,7 @@ def test_datamodule_lm(tmp_path):
     path = create_jsonlines_file(tmp_path, records)
     cfg = SimpleNamespace(
         train_path=path, val_path="", test_path="",
-        batch_size=2, num_workers=0, task="language_modeling"
+        batch_size=2, num_workers=0, task="language_modeling", shuffle_train=False
     )
     dm = MiniFormerDataModule(cfg, tokenizer=DummyTokenizer())
     dm.setup()
@@ -76,7 +76,7 @@ def test_datamodule_classification(tmp_path):
     path = create_jsonlines_file(tmp_path, records)
     cfg = SimpleNamespace(
         train_path=path, val_path="", test_path="",
-        batch_size=2, num_workers=0, task="classification"
+        batch_size=2, num_workers=0, task="classification", shuffle_train=False
     )
     dm = MiniFormerDataModule(cfg, tokenizer=None)
     dm.setup()

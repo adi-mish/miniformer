@@ -59,7 +59,7 @@ class MiniFormerDataModule(L.LightningDataModule):
         return DataLoader(
             self.train_data,
             batch_size=self.cfg.batch_size,
-            shuffle=False,
+            shuffle=getattr(self.cfg, "shuffle_train", True),
             num_workers=self.cfg.num_workers,
             collate_fn=self._collate_fn,
             pin_memory=True,
