@@ -197,6 +197,7 @@ config = TransformerConfig(
     d_ff=2048,
     dropout=0.1,
     activation="swiglu",
+    output_dim=32000,
     max_seq_len=1024
 )
 
@@ -205,7 +206,9 @@ model = Seq2SeqTransformer(config)
 # Training mode: provide both source and target
 src_ids = torch.randint(0, 32000, (2, 64))
 tgt_ids = torch.randint(0, 32000, (2, 48))
-logits, _, _ = model(src_ids, tgt_ids)  # Shape: [2, 48, 32000]
+output = model(src_ids, tgt_ids)
+assert output.logits is not None
+logits = output.logits  # Shape: [2, 48, 32000]
 
 # Generation mode
 src_ids = torch.randint(0, 32000, (1, 64))
@@ -216,6 +219,12 @@ generated = model.generate(
     top_k=40
 )
 ```
+
+`Seq2SeqTransformer.forward` returns a `Seq2SeqModelOutput` dataclass. Use `output.logits`
+when `output_dim` is set, `output.hidden_states` when `output_dim=None`, and
+`output.output` when code can accept either tensor. The object still supports tuple unpacking
+as `(output_tensor, self_attentions, cross_attentions)`, but direct tensor operations should
+use an explicit field.
 
 ---
 

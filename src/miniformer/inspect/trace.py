@@ -125,8 +125,12 @@ def _as_tensor(output: Any) -> Optional[torch.Tensor]:
         return output
     if isinstance(output, (tuple, list)) and output and isinstance(output[0], torch.Tensor):
         return output[0]
-    if hasattr(output, "_dec_out") and isinstance(output._dec_out, torch.Tensor):
-        return output._dec_out
+    if hasattr(output, "output") and isinstance(output.output, torch.Tensor):
+        return output.output
+    if hasattr(output, "logits") and isinstance(output.logits, torch.Tensor):
+        return output.logits
+    if hasattr(output, "hidden_states") and isinstance(output.hidden_states, torch.Tensor):
+        return output.hidden_states
     return None
 
 
@@ -362,7 +366,7 @@ def _compare_seq2seq_cache(
     cached_outputs: list[torch.Tensor] = []
     for index in range(tgt.size(1)):
         current = tgt[:, index : index + 1]
-        output, _, _, past_key_values = model_any.decoder(
+        decoder_output = model_any.decoder(
             current,
             memory,
             None,
@@ -371,7 +375,8 @@ def _compare_seq2seq_cache(
             past_key_values=past_key_values,
             use_cache=True,
         )
-        cached_outputs.append(output)
+        past_key_values = decoder_output.past_key_values
+        cached_outputs.append(decoder_output.output)
 
     cached = torch.cat(cached_outputs, dim=1)
     diff = (full_tensor - cached).abs().max()

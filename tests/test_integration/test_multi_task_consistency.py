@@ -101,5 +101,5 @@ class TestMultiTaskConsistency:
             if models["language_modeling"].model.__class__.__name__ == "Seq2SeqTransformer":
                 src = torch.randint(0, 100, (2, 5))
                 tgt = torch.randint(0, 100, (2, 5))
-                lm_out = models["language_modeling"].model(src, tgt)[0]
+                lm_out = models["language_modeling"].model(src, tgt).output
                 assert lm_out.shape[-1] == 100, "Wrong language model output dimension"

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -7,6 +9,9 @@ import torch.nn as nn
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.encoder import Encoder
 from miniformer.utils.tokenization import stable_token_id
+
+if TYPE_CHECKING:
+    from miniformer.inspect import TransformerTrace
 
 
 class Transformer(nn.Module):
@@ -87,7 +92,7 @@ class Transformer(nn.Module):
         past_key_values: Optional[torch.Tensor] = None,
         use_cache: bool = False,
         **kwargs,
-    ):
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Standard path (``use_cache=False``)
         -----------------------------------
@@ -169,6 +174,7 @@ class Transformer(nn.Module):
         else:
             # slice out the freshly generated tokens
             out_new = proj_full[:, -x.size(1) :, :].contiguous()
+            assert new_past is not None
             return out_new, new_past
 
     def _create_mask(self, x):
@@ -191,7 +197,7 @@ class Transformer(nn.Module):
         top_k: int = 5,
         compare_cache: bool = False,
         **kwargs,
-    ):
+    ) -> TransformerTrace:
         """Capture a structured inspection trace for one encoder-only forward pass."""
         from miniformer.inspect import capture_transformer_trace
 

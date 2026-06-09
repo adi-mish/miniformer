@@ -131,7 +131,7 @@ class MiniFormerModule(nn.Module):
     def forward_batch(self, batch) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         x, y = self._preprocess_batch(batch)
         if self.cfg.task == "language_modeling":
-            outputs = tuple(self.model(x, x, use_causal_mask=True))[0]
+            outputs = self.model(x, x, use_causal_mask=True).output
         else:
             outputs = self.model(x)
         return outputs, y

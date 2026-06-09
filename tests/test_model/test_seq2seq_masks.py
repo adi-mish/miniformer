@@ -16,10 +16,10 @@ def test_seq2seq_forward_causal_mask_prevents_future_target_leakage():
 
     with torch.no_grad():
         # Get decoder output for full target sequence
-        full_output = model(src_tokens, tgt_tokens)
+        full_output = model(src_tokens, tgt_tokens).output
 
         # Get decoder output for partial target sequence (first 3 tokens)
-        partial_output = model(src_tokens, tgt_tokens[:, :3])
+        partial_output = model(src_tokens, tgt_tokens[:, :3]).output
 
     # The first 3 positions should be identical regardless of future tokens
     assert torch.allclose(
@@ -38,8 +38,8 @@ def test_encoder_decoder_attention_alignment():
     tgt = torch.randint(1, 100, (1, 4))
 
     with torch.no_grad():
-        output1 = model(src1, tgt)
-        output2 = model(src2, tgt)
+        output1 = model(src1, tgt).output
+        output2 = model(src2, tgt).output
 
     # Both should produce valid outputs despite different source lengths
     assert output1.shape == (1, 4, 32)
@@ -60,8 +60,8 @@ def test_decoder_self_attention_causal_mask():
         tgt1 = torch.tensor([[1, 2, 3, 4, 5]])
         tgt2 = torch.tensor([[1, 2, 3, 4, 99]])  # Different last token
 
-        output1 = model(src_tokens, tgt1)
-        output2 = model(src_tokens, tgt2)
+        output1 = model(src_tokens, tgt1).output
+        output2 = model(src_tokens, tgt2).output
 
         # All positions except the last should be identical
         assert torch.allclose(
@@ -86,8 +86,8 @@ def test_padding_mask_in_cross_attention():
     tgt = torch.tensor([[10, 20]])
 
     with torch.no_grad():
-        output_padded = model(src_padded, tgt)
-        output_unpadded = model(src_unpadded, tgt)
+        output_padded = model(src_padded, tgt).output
+        output_unpadded = model(src_unpadded, tgt).output
 
     # Outputs should have same shape
     assert output_padded.shape == (1, 2, 32)
@@ -117,17 +117,18 @@ def test_decoder_cache_matches_full_pass_for_chunked_targets():
 
     with torch.no_grad():
         memory = model.encoder(src, src_mask)
-        full_out, _, _ = model.decoder(
+        full_decoder_output = model.decoder(
             tgt,
             memory,
             cross_attn_mask=src_mask,
             use_causal_mask=True,
         )
+        full_out = full_decoder_output.output
 
         past_key_values = None
         cached_chunks = []
         for start, end in [(0, 2), (2, 5), (5, 6)]:
-            chunk_out, _, _, past_key_values = model.decoder(
+            chunk_decoder_output = model.decoder(
                 tgt[:, start:end],
                 memory,
                 cross_attn_mask=src_mask,
@@ -135,7 +136,8 @@ def test_decoder_cache_matches_full_pass_for_chunked_targets():
                 past_key_values=past_key_values,
                 use_cache=True,
             )
-            cached_chunks.append(chunk_out)
+            past_key_values = chunk_decoder_output.past_key_values
+            cached_chunks.append(chunk_decoder_output.output)
 
     cached_out = torch.cat(cached_chunks, dim=1)
     assert torch.allclose(full_out, cached_out, atol=1e-5)

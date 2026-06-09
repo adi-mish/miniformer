@@ -78,6 +78,10 @@ def verify_model_equivalence(
         output1 = output1[0]
     if isinstance(output2, tuple):
         output2 = output2[0]
+    if hasattr(output1, "output"):
+        output1 = output1.output
+    if hasattr(output2, "output"):
+        output2 = output2.output
 
     return torch.allclose(output1, output2, atol=tolerance)
 

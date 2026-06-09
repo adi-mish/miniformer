@@ -2,7 +2,7 @@ import pytest
 import torch
 
 from miniformer.config.model_config import TransformerConfig
-from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
+from miniformer.model.seq2seq_transformer import Seq2SeqModelOutput, Seq2SeqTransformer
 from miniformer.model.transformer import Transformer
 
 
@@ -85,12 +85,34 @@ def test_seq2seq_forward_and_generate():
 
     src = torch.randint(0, cfg.vocab_size, (3, 12))
     tgt = torch.randint(0, cfg.vocab_size, (3, 14))
-    logits, _, _ = seq2seq(src, tgt)
-    assert logits.shape == (3, 14, cfg.vocab_size)
+    output = seq2seq(src, tgt)
+    assert isinstance(output, Seq2SeqModelOutput)
+    assert output.logits is not None
+    assert output.hidden_states is None
+    assert output.output.shape == (3, 14, cfg.vocab_size)
+    logits, self_attentions, cross_attentions = output
+    assert logits is output.output
+    assert len(self_attentions) == cfg.n_layers
+    assert len(cross_attentions) == cfg.n_layers
+    with pytest.raises(TypeError):
+        torch.isfinite(output)
 
     # Greedy generation shouldn’t error and should produce only token IDs
     gen = seq2seq.generate(src, max_new_tokens=5)
     assert gen.dim() == 2 and gen.size(0) == 3
+
+
+def test_seq2seq_forward_without_output_dim_returns_hidden_states():
+    cfg = TransformerConfig(vocab_size=200, d_model=32, n_heads=4, n_layers=2, d_ff=64)
+    seq2seq = Seq2SeqTransformer(cfg)
+
+    src = torch.randint(0, cfg.vocab_size, (2, 8))
+    tgt = torch.randint(0, cfg.vocab_size, (2, 6))
+    output = seq2seq(src, tgt)
+
+    assert output.logits is None
+    assert output.hidden_states is not None
+    assert output.output.shape == (2, 6, cfg.d_model)
 
 
 @pytest.mark.parametrize("pad_token", [0])

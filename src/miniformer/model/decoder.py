@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import torch
@@ -6,6 +9,40 @@ import torch.nn as nn
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.attention import MultiHeadAttention
 from miniformer.model.feedforward import FeedForward
+
+KeyValue = Tuple[torch.Tensor, torch.Tensor]
+LayerPastKeyValues = Tuple[Optional[KeyValue], Optional[KeyValue]]
+DecoderPastKeyValues = List[LayerPastKeyValues]
+AttentionList = List[Optional[torch.Tensor]]
+
+
+@dataclass(frozen=True)
+class DecoderOutput:
+    """Explicit decoder output with optional autoregressive cache."""
+
+    output: torch.Tensor
+    self_attentions: AttentionList
+    cross_attentions: AttentionList
+    past_key_values: Optional[DecoderPastKeyValues] = None
+
+    def __iter__(self):
+        """Preserve tuple-unpacking compatibility for existing decoder callers."""
+        yield self.output
+        yield self.self_attentions
+        yield self.cross_attentions
+        if self.past_key_values is not None:
+            yield self.past_key_values
+
+    def __getitem__(self, index: int):
+        if index == 0:
+            return self.output
+        if index == 1:
+            return self.self_attentions
+        if index == 2:
+            return self.cross_attentions
+        if index == 3 and self.past_key_values is not None:
+            return self.past_key_values
+        raise IndexError(index)
 
 
 class DecoderLayer(nn.Module):
@@ -52,10 +89,10 @@ class DecoderLayer(nn.Module):
         use_cache: bool = False,
     ) -> Tuple[
         torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        Optional[Tuple[torch.Tensor, torch.Tensor]],
-        Optional[Tuple[torch.Tensor, torch.Tensor]],
+        Optional[torch.Tensor],
+        Optional[torch.Tensor],
+        Optional[KeyValue],
+        Optional[KeyValue],
     ]:
 
         # choose norm order
@@ -149,8 +186,8 @@ class Decoder(nn.Module):
         # Apply weight initialization
         self.apply(self._init_weights)
 
-        self.self_attentions: Optional[List[torch.Tensor]] = None
-        self.cross_attentions: Optional[List[torch.Tensor]] = None
+        self.self_attentions: Optional[AttentionList] = None
+        self.cross_attentions: Optional[AttentionList] = None
 
     def _init_weights(self, module):
         """Initialize weights following transformer conventions"""
@@ -184,19 +221,15 @@ class Decoder(nn.Module):
         past_key_values: Optional[
             List[
                 Tuple[
-                    Optional[Tuple[torch.Tensor, torch.Tensor]],
-                    Optional[Tuple[torch.Tensor, torch.Tensor]],
+                    Optional[KeyValue],
+                    Optional[KeyValue],
                 ]
             ]
         ] = None,
         use_cache: bool = False,
         return_hidden: bool = False,
-    ):
-        """
-        Returns
-        -------
-        (output, self_attns, cross_attns [, new_past_kv])
-        """
+    ) -> DecoderOutput:
+        """Run the decoder stack and return projected output, attentions, and optional cache."""
         batch_size, seq_len = x.size(0), x.size(1)
         device = x.device
         past_len = 0
@@ -233,10 +266,11 @@ class Decoder(nn.Module):
         if use_causal_mask and self_attn_mask is None:
             self_attn_mask = self.create_causal_mask(seq_len, device, past_len)
 
-        self_attentions, cross_attentions = [], []
+        self_attentions: AttentionList = []
+        cross_attentions: AttentionList = []
         if past_key_values is None:
             past_key_values = [(None, None) for _ in range(len(self.layers))]
-        new_past_kv: List[Tuple[Tuple, Tuple]] = []
+        new_past_kv: DecoderPastKeyValues = []
 
         # ── transformer layers ───────────────────────────────────────────
         for i, layer in enumerate(self.layers):
@@ -261,13 +295,14 @@ class Decoder(nn.Module):
         # ── final projection (optional) ──────────────────────────────────
         output = x if return_hidden else self.output_projection(x)
 
-        return (
-            (output, self_attentions, cross_attentions, new_past_kv)
-            if use_cache
-            else (output, self_attentions, cross_attentions)
+        return DecoderOutput(
+            output=output,
+            self_attentions=self_attentions,
+            cross_attentions=cross_attentions,
+            past_key_values=new_past_kv if use_cache else None,
         )
 
-    def get_attention_weights(self) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    def get_attention_weights(self) -> Tuple[AttentionList, AttentionList]:
         """Get attention weights from the last forward pass"""
         # This would need to be called after a forward pass
         if self.self_attentions is None or self.cross_attentions is None:

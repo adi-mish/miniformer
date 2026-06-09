@@ -6,66 +6,59 @@ arbitrary feature vectors (e.g. audio, vision, time-series)."""
 
 from __future__ import annotations
 
-from typing import Optional
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional
 
 import torch
 import torch.nn as nn
 
 from miniformer.config.model_config import TransformerConfig
-from miniformer.model.decoder import Decoder  # existing decoder stack
+from miniformer.model.decoder import AttentionList, Decoder, DecoderPastKeyValues
 from miniformer.model.encoder import Encoder  # existing encoder stack
 
+if TYPE_CHECKING:
+    from miniformer.inspect import TransformerTrace
+
 __all__ = [
+    "Seq2SeqModelOutput",
     "Seq2SeqTransformer",
     "create_padding_mask",
     "create_causal_mask",
 ]
 
 
-class Seq2SeqOutput:
-    """
-    Holds (dec_out, self_attns, cross_attns) but behaves like dec_out for
-    indexing, shape, and torch operations, while still unpacking into three
-    components.
-    """
+@dataclass(frozen=True)
+class Seq2SeqModelOutput:
+    """Explicit encoder-decoder model output."""
 
-    def __init__(self, dec_out, self_attns, cross_attns):
-        self._dec_out = dec_out
-        self._self_attns = self_attns
-        self._cross_attns = cross_attns
+    logits: Optional[torch.Tensor]
+    hidden_states: Optional[torch.Tensor]
+    self_attentions: AttentionList
+    cross_attentions: AttentionList
+
+    @property
+    def output(self) -> torch.Tensor:
+        """Return logits when present, otherwise the decoder hidden states."""
+        if self.logits is not None:
+            return self.logits
+        if self.hidden_states is not None:
+            return self.hidden_states
+        raise RuntimeError("Seq2SeqModelOutput has neither logits nor hidden states")
 
     def __iter__(self):
-        # support unpacking: a, b, c = model(...)
-        yield self._dec_out
-        yield self._self_attns
-        yield self._cross_attns
+        """Preserve tuple-unpacking compatibility: output, self_attns, cross_attns."""
+        yield self.output
+        yield self.self_attentions
+        yield self.cross_attentions
 
-    def __getitem__(self, idx):
-        # tuple-style access first
-        if isinstance(idx, int):
-            if idx == 0:
-                return self._dec_out
-            elif idx == 1:
-                return self._self_attns
-            elif idx == 2:
-                return self._cross_attns
-        # otherwise treat as tensor slicing
-        return self._dec_out[idx]
-
-    def __getattr__(self, name):
-        # delegate attributes (e.g. .shape) to the tensor
-        return getattr(self._dec_out, name)
-
-    @classmethod
-    def __torch_function__(cls, func, types, args=(), kwargs=None):
-        # intercept torch.* calls and redirect to the tensor
-        if kwargs is None:
-            kwargs = {}
-        # replace any Seq2SeqOutput in args with its underlying tensor
-        new_args = []
-        for a in args:
-            new_args.append(a._dec_out if isinstance(a, Seq2SeqOutput) else a)
-        return func(*new_args, **kwargs)
+    def __getitem__(self, index: int):
+        if index == 0:
+            return self.output
+        if index == 1:
+            return self.self_attentions
+        if index == 2:
+            return self.cross_attentions
+        raise IndexError(index)
 
 
 def create_padding_mask(seq: torch.Tensor, pad_id: int = 0) -> torch.Tensor:
@@ -92,7 +85,7 @@ def create_causal_mask(seq_len: int, device: torch.device) -> torch.Tensor:
 
 
 class Seq2SeqTransformer(nn.Module):
-    """Full encoder-decoder wrapper that returns decoder hidden states."""
+    """Full encoder-decoder wrapper with explicit model outputs."""
 
     def __init__(
         self, config: Optional[TransformerConfig] = None, share_embeddings: bool = True, **kwargs
@@ -154,9 +147,8 @@ class Seq2SeqTransformer(nn.Module):
         tgt_mask: Optional[torch.Tensor] = None,
         memory_mask: Optional[torch.Tensor] = None,
         use_causal_mask: bool = True,
-    ) -> Seq2SeqOutput:
-        """Return *hidden states* (d_model) when ``output_dim`` is **None**,
-        otherwise return projected logits."""
+    ) -> Seq2SeqModelOutput:
+        """Return projected logits when ``output_dim`` is set, otherwise decoder hidden states."""
         # ── build masks ─────────────────────────────────────────────────
         if src_mask is None:
             src_mask = create_padding_mask(src)
@@ -175,7 +167,7 @@ class Seq2SeqTransformer(nn.Module):
 
         # ── decode ─────────────────────────────────────────────────────
         need_hidden = isinstance(self.decoder.output_projection, nn.Identity)
-        dec_out, self_attns, cross_attns = self.decoder(
+        decoder_output = self.decoder(
             tgt,
             memory,
             tgt_mask,
@@ -184,7 +176,13 @@ class Seq2SeqTransformer(nn.Module):
             return_hidden=need_hidden,
         )
 
-        return Seq2SeqOutput(dec_out, self_attns, cross_attns)
+        dec_out = decoder_output.output
+        return Seq2SeqModelOutput(
+            logits=None if need_hidden else dec_out,
+            hidden_states=dec_out if need_hidden else None,
+            self_attentions=decoder_output.self_attentions,
+            cross_attentions=decoder_output.cross_attentions,
+        )
 
     def trace(
         self,
@@ -197,7 +195,7 @@ class Seq2SeqTransformer(nn.Module):
         *,
         top_k: int = 5,
         compare_cache: bool = False,
-    ):
+    ) -> TransformerTrace:
         """Capture a structured inspection trace for one seq2seq forward pass."""
         from miniformer.inspect import capture_transformer_trace
 
@@ -235,13 +233,13 @@ class Seq2SeqTransformer(nn.Module):
         generated = torch.full((src.size(0), 1), bos_token_id, dtype=torch.long, device=device)
 
         # Implement caching for faster generation
-        past_key_values = None
+        past_key_values: Optional[DecoderPastKeyValues] = None
         use_cache = True
 
         for _ in range(max_new_tokens):
             # Use caching for more efficient generation
             if use_cache:
-                dec_out, self_attns, cross_attns, past_key_values = self.decoder(
+                decoder_output = self.decoder(
                     generated if past_key_values is None else generated[:, -1:],
                     memory,
                     None,
@@ -250,14 +248,17 @@ class Seq2SeqTransformer(nn.Module):
                     past_key_values=past_key_values,
                     use_cache=True,
                 )
+                dec_out = decoder_output.output
+                past_key_values = decoder_output.past_key_values
             else:
-                dec_out, _, _ = self.decoder(
+                decoder_output = self.decoder(
                     generated,
                     memory,
                     None,
                     src_mask,
                     use_causal_mask=True,
                 )
+                dec_out = decoder_output.output
 
             # Get logits for the next token. If normal forward() is configured
             # to return hidden states, reuse the token embedding as a vocab head
