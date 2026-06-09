@@ -350,9 +350,7 @@ def _compare_seq2seq_cache(
 
     src_mask = padding_mask(src)
     model_any = cast(Any, model)
-    enc_input_proj = getattr(model_any, "_enc_input_proj", None)
-    src_proj = enc_input_proj(src) if enc_input_proj is not None and src.dim() == 3 else src
-    memory = model_any.encoder(src_proj, src_mask)
+    memory = model_any.encoder(src, src_mask)
 
     past_key_values = None
     cached_outputs: list[torch.Tensor] = []

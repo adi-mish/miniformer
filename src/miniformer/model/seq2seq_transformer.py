@@ -58,25 +58,6 @@ class Seq2SeqTransformer(nn.Module):
         ):
             self.decoder.token_embedding.weight = self.encoder.token_embedding.weight
 
-        # encoder input projection if needed
-        self._enc_input_proj: Optional[nn.Linear]
-        if config.input_dim is not None and config.input_dim != config.d_model:
-            self._enc_input_proj = nn.Linear(config.input_dim, config.d_model)
-        else:
-            self._enc_input_proj = None
-
-        # use default initializers
-        self.apply(self._init_weights)
-
-    def _init_weights(self, module):
-        if isinstance(module, (nn.Linear, nn.Embedding)):
-            nn.init.xavier_uniform_(module.weight)
-            if isinstance(module, nn.Linear) and module.bias is not None:
-                nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.LayerNorm):
-            nn.init.zeros_(module.bias)
-            nn.init.ones_(module.weight)
-
     def forward(
         self,
         src: torch.Tensor,
@@ -99,8 +80,7 @@ class Seq2SeqTransformer(nn.Module):
             memory_mask = src_mask
 
         # ── encode ─────────────────────────────────────────────────────
-        src_proj = self._enc_input_proj(src) if (self._enc_input_proj and src.dim() == 3) else src
-        memory = self.encoder(src_proj, src_mask)
+        memory = self.encoder(src, src_mask)
 
         # ── decode ─────────────────────────────────────────────────────
         decoder_output = self.decoder(

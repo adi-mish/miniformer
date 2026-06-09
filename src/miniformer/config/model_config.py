@@ -54,6 +54,8 @@ class TransformerConfig:
             raise ValueError("dropout must be in the range [0, 1)")
         if self.rotary_pct < 0 or self.rotary_pct > 1:
             raise ValueError("rotary_pct must be in the range [0, 1]")
+        if self.initializer_range <= 0:
+            raise ValueError("initializer_range must be positive")
 
         if self.d_model % self.n_heads != 0:
             raise ValueError(

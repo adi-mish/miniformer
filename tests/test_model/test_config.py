@@ -39,6 +39,11 @@ def test_invalid_rotary_pct():
         TransformerConfig(rotary_pct=1.5)
 
 
+def test_invalid_initializer_range():
+    with pytest.raises(ValueError, match="initializer_range"):
+        TransformerConfig(initializer_range=0.0)
+
+
 def test_optional_attention_config_serializes(tmp_path):
     """Test optional attention fields are first-class config fields."""
     config = TransformerConfig(pre_norm=False, use_sdpa=True, position_mode="rope", rotary_pct=0.5)

@@ -1,6 +1,8 @@
+import pytest
 import torch
 import torch.nn as nn
 
+from miniformer.model.seq2seq_transformer import Seq2SeqTransformer
 from miniformer.model.transformer import Transformer, TransformerConfig
 
 
@@ -134,6 +136,75 @@ def test_rotary_embedding_implementation():
     assert not torch.allclose(
         outputs[0.0], outputs[1.0], atol=1e-3
     ), "Full rotary embeddings should differ from no rotary embeddings"
+
+
+@pytest.mark.parametrize(
+    "position_mode,rotary_pct,has_learned_positions,has_rope",
+    [
+        ("learned", 0.0, True, False),
+        ("rope", 0.5, False, True),
+        ("learned+rope", 0.5, True, True),
+    ],
+)
+def test_position_mode_controls_learned_embeddings_and_rope(
+    position_mode, rotary_pct, has_learned_positions, has_rope
+):
+    config = TransformerConfig(
+        vocab_size=100,
+        d_model=32,
+        n_heads=4,
+        n_layers=1,
+        position_mode=position_mode,
+        rotary_pct=rotary_pct,
+    )
+    encoder_model = Transformer(config)
+    seq2seq_model = Seq2SeqTransformer(config)
+
+    assert (encoder_model.encoder.pos_embedding is not None) is has_learned_positions
+    assert (seq2seq_model.decoder.position_encoding is not None) is has_learned_positions
+    assert (encoder_model.encoder.layers[0].self_attention.rotary_dim > 0) is has_rope
+    assert (seq2seq_model.decoder.layers[0].self_attention.rotary_dim > 0) is has_rope
+
+
+def test_initializer_range_controls_projection_head_and_backbone():
+    torch.manual_seed(0)
+    config = TransformerConfig(
+        vocab_size=100,
+        d_model=64,
+        n_heads=8,
+        n_layers=1,
+        output_mode="projection",
+        output_dim=7,
+        initializer_range=0.003,
+    )
+    model = Transformer(config)
+
+    backbone_std = model.encoder.layers[0].self_attention.wq.weight.std().item()
+    head = model.output_projection
+    assert isinstance(head, nn.Linear)
+    head_std = head.weight.std().item()
+
+    assert 0.0 < backbone_std < 0.006
+    assert 0.0 < head_std < 0.006
+    assert torch.equal(head.bias, torch.zeros_like(head.bias))
+
+
+def test_seq2seq_uses_config_initializer_without_outer_reinitialization():
+    torch.manual_seed(0)
+    config = TransformerConfig(
+        vocab_size=100,
+        d_model=64,
+        n_heads=8,
+        n_layers=1,
+        output_mode="vocab",
+        initializer_range=0.003,
+    )
+    model = Seq2SeqTransformer(config)
+
+    assert model.encoder.token_embedding is not None
+    assert model.encoder.token_embedding.weight.std().item() < 0.006
+    assert isinstance(model.decoder.output_projection, nn.Linear)
+    assert model.decoder.output_projection.weight.std().item() < 0.006
 
 
 def test_model_parameter_count_scaling():

@@ -8,6 +8,7 @@ import torch.nn as nn
 
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.encoder import Encoder
+from miniformer.model.initialization import init_transformer_module
 from miniformer.model.masks import padding_mask, self_attention_mask
 from miniformer.model.outputs import TransformerModelOutput
 from miniformer.utils.tokenization import stable_token_id
@@ -51,6 +52,9 @@ class Transformer(nn.Module):
         elif config.output_mode == "projection":
             assert config.output_dim is not None
             self.output_projection = nn.Linear(config.d_model, config.output_dim)
+            self.output_projection.apply(
+                lambda module: init_transformer_module(module, config.initializer_range)
+            )
             self._tied_weights = False
         else:
             raise ValueError(f"Unknown output_mode: {config.output_mode}")

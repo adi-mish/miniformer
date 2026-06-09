@@ -148,6 +148,26 @@ def test_seq2seq_forward_without_output_dim_returns_hidden_states():
     assert output.output.shape == (2, 6, cfg.d_model)
 
 
+def test_seq2seq_feature_inputs_use_encoder_and_decoder_projections_once():
+    cfg = TransformerConfig(
+        input_dim=5,
+        d_model=16,
+        n_heads=4,
+        n_layers=1,
+        d_ff=32,
+        output_mode="projection",
+        output_dim=3,
+    )
+    seq2seq = Seq2SeqTransformer(cfg)
+
+    src = torch.randn(2, 7, cfg.input_dim)
+    tgt = torch.randn(2, 4, cfg.input_dim)
+    output = seq2seq(src, tgt)
+
+    assert output.projection is not None
+    assert output.output.shape == (2, 4, cfg.output_dim)
+
+
 @pytest.mark.parametrize("pad_token", [0])
 def test_padding_masking(pad_token):
     """

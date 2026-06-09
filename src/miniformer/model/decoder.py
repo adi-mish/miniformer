@@ -9,6 +9,7 @@ import torch.nn as nn
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.attention import MultiHeadAttention
 from miniformer.model.feedforward import FeedForward
+from miniformer.model.initialization import init_transformer_module
 from miniformer.model.masks import causal_mask
 
 KeyValue = Tuple[torch.Tensor, torch.Tensor]
@@ -50,7 +51,9 @@ class DecoderLayer(nn.Module):
             n_heads=config.n_heads,
             dropout=config.dropout,
             use_sdpa=getattr(config, "use_sdpa", False),
-            rotary_pct=getattr(config, "rotary_pct", 0.0),
+            rotary_pct=(
+                config.rotary_pct if config.position_mode in {"rope", "learned+rope"} else 0.0
+            ),
         )
         self.cross_attention = MultiHeadAttention(
             d_model=config.d_model,
@@ -159,8 +162,11 @@ class Decoder(nn.Module):
             self.token_embedding = nn.Embedding(config.vocab_size, config.d_model)
             self.input_projection = None
 
-        # Positional encoding - learnable for flexibility with different sequence types
-        self.position_encoding = nn.Embedding(config.max_seq_len, config.d_model)
+        self.position_encoding: Optional[nn.Embedding]
+        if config.position_mode in {"learned", "learned+rope"}:
+            self.position_encoding = nn.Embedding(config.max_seq_len, config.d_model)
+        else:
+            self.position_encoding = None
         self.dropout = nn.Dropout(config.dropout)
 
         # Decoder layers
@@ -185,13 +191,7 @@ class Decoder(nn.Module):
 
     def _init_weights(self, module):
         """Initialize weights following transformer conventions"""
-        if isinstance(module, (nn.Linear, nn.Embedding)):
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if isinstance(module, nn.Linear) and module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
+        init_transformer_module(module, self.config.initializer_range)
 
     def _create_causal_mask(
         self,
@@ -252,7 +252,9 @@ class Decoder(nn.Module):
             .unsqueeze(0)
             .expand(batch_size, seq_len)
         )
-        x = self.dropout(x + self.position_encoding(positions))
+        if self.position_encoding is not None:
+            x = x + self.position_encoding(positions)
+        x = self.dropout(x)
 
         if use_causal_mask and self_attn_mask is None:
             self_attn_mask = self._create_causal_mask(seq_len, device, past_len)

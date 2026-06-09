@@ -9,6 +9,7 @@ import torch.nn as nn
 from miniformer.config.model_config import TransformerConfig
 from miniformer.model.attention import MultiHeadAttention
 from miniformer.model.feedforward import FeedForward
+from miniformer.model.initialization import init_transformer_module
 
 
 @dataclass(frozen=True)
@@ -31,7 +32,9 @@ class EncoderLayer(nn.Module):
             n_heads=config.n_heads,
             dropout=config.dropout,
             use_sdpa=getattr(config, "use_sdpa", False),
-            rotary_pct=getattr(config, "rotary_pct", 0.0),
+            rotary_pct=(
+                config.rotary_pct if config.position_mode in {"rope", "learned+rope"} else 0.0
+            ),
         )
         self.feed_forward = FeedForward(
             d_model=config.d_model,
@@ -87,8 +90,11 @@ class Encoder(nn.Module):
             self.token_embedding = None
             self.input_projection = nn.Linear(config.input_dim, config.d_model)
 
-        # Learned positional embeddings for maximum flexibility
-        self.pos_embedding = nn.Embedding(config.max_seq_len, config.d_model)
+        self.pos_embedding: Optional[nn.Embedding]
+        if config.position_mode in {"learned", "learned+rope"}:
+            self.pos_embedding = nn.Embedding(config.max_seq_len, config.d_model)
+        else:
+            self.pos_embedding = None
         self.dropout = nn.Dropout(config.dropout)
 
         # ― transformer blocks ―
@@ -101,13 +107,7 @@ class Encoder(nn.Module):
 
     # ------------------------------------------------------------------ utils
     def _init_weights(self, module):
-        if isinstance(module, (nn.Linear, nn.Embedding)):
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if isinstance(module, nn.Linear) and module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
+        init_transformer_module(module, self.config.initializer_range)
 
     # ---------------------------------------------------------------- forward
     def forward(
@@ -132,8 +132,9 @@ class Encoder(nn.Module):
             raise RuntimeError("Encoder has no input layer (token_embedding or input_projection)")
 
         # add positions
-        positions = torch.arange(S, device=device).unsqueeze(0).expand(B, S)
-        x = x + self.pos_embedding(positions)
+        if self.pos_embedding is not None:
+            positions = torch.arange(S, device=device).unsqueeze(0).expand(B, S)
+            x = x + self.pos_embedding(positions)
         x = self.dropout(x)
 
         # run blocks
